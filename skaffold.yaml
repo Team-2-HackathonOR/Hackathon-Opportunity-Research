@@ -1,0 +1,40 @@
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: team-2
+manifests:
+  rawYaml:
+    - ./infra/namespace.yaml
+    - ./infra/etl-configmap.yaml
+    - ./infra/etl-secret.yaml
+    - ./infra/etl-deployment.yaml
+    - ./infra/etl-service.yaml
+    - ./infra/scraper-configmap.yaml
+    - ./infra/scraper-secret.yaml
+    - ./infra/scraper-deployment.yaml
+    - ./infra/scraper-service.yaml
+build:
+   local:
+        push: false # <-- Cleanly overrides build strategies for local environments without patches
+   artifacts:
+    - image: team2-etl
+      context: ETL
+      docker:
+        dockerfile: Dockerfile
+      sync:
+        manual:
+          - src: "app/**/*.py"
+            dest: .
+          - src: "main.py"
+            dest: .
+    - image: team2-scraper
+      context: scraper
+      docker:
+        dockerfile: Dockerfile
+      sync:
+        manual:
+          - src: "**/*.ts"
+            dest: .
+ 
+  
+    
