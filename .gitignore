@@ -1,13 +1,2 @@
-node_modules/
-dist/
-.env
-.env.local
-*.log
-logs/
-.DS_Store
-.idea/
-.vscode/
-coverage/
-.venv/
-__pycache__/
-*.pyc
+hackascout-gateway/.env
+hackascout-gateway/node_modules/
