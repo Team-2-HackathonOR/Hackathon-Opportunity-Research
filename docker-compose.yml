@@ -1,0 +1,72 @@
+services:
+  hackathon-service:
+    build:
+      context: ./services/hackathon-service
+      dockerfile: Dockerfile
+    ports:
+      - "4001:4001"
+    env_file:
+      - ./services/hackathon-service/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4001/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  mail-service:
+    build:
+      context: ./services/mail-service
+      dockerfile: Dockerfile
+    ports:
+      - "4005:4005"
+    environment:
+      PORT: "4005"
+      GATEWAY_INTERNAL_SECRET: ${GATEWAY_INTERNAL_SECRET:-local-dev-gateway-secret}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-research@localhost}
+      SMTP_TLS: ${SMTP_TLS:-true}
+    restart: unless-stopped
+
+  jwt-service:
+    build:
+      context: ./jwt-service
+      dockerfile: Dockerfile
+    ports:
+      - "4004:4004"
+    env_file:
+      - ./jwt-service/.env
+    environment:
+      MAIL_SERVICE_URL: http://mail-service:4005
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4004/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./gateway/.env
+    environment:
+      HACKATHON_SERVICE_URL: http://hackathon-service:4001
+      JWT_SERVICE_URL: http://jwt-service:4004
+    depends_on:
+      hackathon-service:
+        condition: service_healthy
+      jwt-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

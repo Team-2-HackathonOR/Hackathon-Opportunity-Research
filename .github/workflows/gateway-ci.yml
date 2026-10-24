@@ -1,0 +1,57 @@
+name: gateway-ci
+
+on:
+  push:
+    paths:
+      - "gateway/**"
+      - "jwt-service/**"
+      - "services/hackathon-service/**"
+      - ".github/workflows/gateway-ci.yml"
+  pull_request:
+    paths:
+      - "gateway/**"
+      - "jwt-service/**"
+      - "services/hackathon-service/**"
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm test
+
+  jwt-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jwt-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm test
+
+  hackathon-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/hackathon-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm test
