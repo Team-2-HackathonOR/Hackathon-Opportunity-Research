@@ -3,12 +3,22 @@
   "private": true,
   "description": "Team-2 hackathon research platform (gateway + services)",
   "scripts": {
+    "dev": "concurrently --kill-others --names hackathon,jwt,scraper,gateway,client,mail,etl \"npm run dev:hackathon\" \"npm run dev:jwt\" \"npm run dev:scraper\" \"npm run dev:gateway\" \"npm run dev:client\" \"npm run dev:mail\" \"npm run dev:etl\"",
     "dev:hackathon": "npm run dev --prefix services/hackathon-service",
     "dev:jwt": "npm run dev --prefix jwt-service",
+    "dev:scraper": "npm run dev --prefix scraper",
     "dev:gateway": "npm run dev --prefix gateway",
-    "install:all": "npm install --prefix services/hackathon-service && npm install --prefix jwt-service && npm install --prefix gateway",
+    "dev:client": "http-server client/public -p 3001 -c-1 -P http://localhost:4000",
+    "dev:mail": "cd services/mail-service && .venv\\Scripts\\python.exe -m uvicorn main:app --reload --host 127.0.0.1 --port 4005 --env-file .env",
+    "dev:etl": "cd ETL && .venv\\Scripts\\python.exe -m uvicorn main:app --reload --host 127.0.0.1 --port 8000 --env-file .env",
+    "install:python": "uv venv --python 3.12 --allow-existing services/mail-service/.venv && uv pip install --python services/mail-service/.venv/Scripts/python.exe -r services/mail-service/requirements.txt && uv venv --python 3.12 --allow-existing ETL/.venv && uv pip install --python ETL/.venv/Scripts/python.exe -r ETL/requirements.txt",
+    "install:all": "npm install --prefix services/hackathon-service && npm install --prefix jwt-service && npm install --prefix scraper && npm install --prefix gateway",
     "typecheck": "npm run typecheck --prefix services/hackathon-service && npm run typecheck --prefix jwt-service && npm run typecheck --prefix gateway",
     "test": "npm test --prefix services/hackathon-service && npm test --prefix jwt-service && npm test --prefix gateway"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "http-server": "^14.1.1"
   },
   "engines": {
     "node": ">=20"

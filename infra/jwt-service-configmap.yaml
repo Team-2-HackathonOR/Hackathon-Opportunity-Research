@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jwt-service-config
+  namespace: hackathon-research
+data:
+  PORT: "4004"
+  NODE_ENV: production
+  SERVICE_NAME: jwt-service
+  LOG_LEVEL: info
+  DATABASE_SSL: "true"
+  JWT_ISSUER: team-2-gateway
+  JWT_TTL_SECONDS: "7200"
+  INVITE_URL_BASE: http://localhost:3000/accept-invite
+  INVITE_TTL_SECONDS: "604800"
+  BCRYPT_ROUNDS: "12"
+  MAIL_SERVICE_URL: http://mail-service:4005

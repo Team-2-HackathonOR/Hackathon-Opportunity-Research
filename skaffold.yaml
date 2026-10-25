@@ -5,6 +5,18 @@ metadata:
 manifests:
   rawYaml:
     - ./infra/namespace.yaml
+    - ./infra/gateway-configmap.yaml
+    - ./infra/gateway-deployment.yaml
+    - ./infra/gateway-service.yaml
+    - ./infra/hackathon-service-configmap.yaml
+    - ./infra/hackathon-service-deployment.yaml
+    - ./infra/hackathon-service-service.yaml
+    - ./infra/jwt-service-configmap.yaml
+    - ./infra/jwt-service-deployment.yaml
+    - ./infra/jwt-service-service.yaml
+    - ./infra/mail-service-configmap.yaml
+    - ./infra/mail-service-deployment.yaml
+    - ./infra/mail-service-service.yaml
     - ./infra/etl-configmap.yaml
     - ./infra/etl-secret.yaml
     - ./infra/etl-deployment.yaml
@@ -14,9 +26,25 @@ manifests:
     - ./infra/scraper-deployment.yaml
     - ./infra/scraper-service.yaml
 build:
-   local:
-        push: false # <-- Cleanly overrides build strategies for local environments without patches
-   artifacts:
+  local:
+    push: false
+  artifacts:
+    - image: team2-gateway
+      context: gateway
+      docker:
+        dockerfile: Dockerfile
+    - image: team2-hackathon-service
+      context: services/hackathon-service
+      docker:
+        dockerfile: Dockerfile
+    - image: team2-jwt-service
+      context: jwt-service
+      docker:
+        dockerfile: Dockerfile
+    - image: team2-mail-service
+      context: services/mail-service
+      docker:
+        dockerfile: Dockerfile
     - image: team2-etl
       context: ETL
       docker:
@@ -35,6 +63,4 @@ build:
         manual:
           - src: "**/*.ts"
             dest: .
- 
-  
     

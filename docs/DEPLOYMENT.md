@@ -10,6 +10,74 @@ See [LOCAL-RUN.md](./LOCAL-RUN.md): start `jwt-service` (4004), `services/hackat
 docker compose up --build
 ```
 
+## Hackathon service on Vercel
+
+Set the Vercel project root directory to `services/hackathon-service`.
+The detected `src/app.ts` entrypoint exports an HTTP handler that initializes
+Fastify once per function instance. Local development and Docker continue to
+start the listening server through `src/index.ts`.
+
+Configure `DATABASE_URL`, `DATABASE_SSL=true`, and `GATEWAY_INTERNAL_SECRET`
+in Vercel's environment settings. The shared secret must match the gateway.
+Leave `LOG_FILE_PATH` unset so logs go to stdout rather than the function's
+filesystem. Redeploy after changing code or environment settings.
+Check `/health/live` for function startup and `/health/ready` for database
+connectivity, then set the gateway's `HACKATHON_SERVICE_URL` to the deployment's
+base URL.
+
+## JWT service on Vercel
+
+Set the Vercel project root directory to `jwt-service`. Its `src/app.ts`
+default HTTP handler initializes the same PostgreSQL user, invitation, token,
+and optional LDAP stores as the local entrypoint. Initialization is shared
+across requests within each function instance, including startup seed handling
+and expired-token cleanup.
+
+Configure `DATABASE_URL` for the auth database, `DATABASE_SSL=true`,
+`JWT_SECRET` (at least 32 characters), and `GATEWAY_INTERNAL_SECRET` (matching
+the gateway). `AUTH_DATABASE_URL`, when supplied, overrides `DATABASE_URL`;
+the current validator still requires `DATABASE_URL`. Leave production seed
+passwords and `LOG_FILE_PATH` unset. Configure `MAIL_SERVICE_URL` and LDAP
+settings only when those services are available from Vercel.
+
+Redeploy, verify `/health/live` and `/health/ready`, and point the gateway's
+`JWT_SERVICE_URL` to the deployment base URL.
+
+## Kubernetes (Skaffold)
+
+Create the namespace secrets before the first deploy. Use the same
+`GATEWAY_INTERNAL_SECRET` for gateway, hackathon-service, jwt-service, and
+mail-service; set the two database URLs and JWT signing secret to their actual
+values. Keep these values in your cluster secret manager or local environment,
+not in checked-in YAML.
+The shared internal secret must be at least 16 characters; `JWT_SECRET` must
+be at least 32 characters.
+
+Create the namespace first with `kubectl apply -f infra/namespace.yaml`.
+
+Required Secret keys:
+
+| Secret | Keys |
+|--------|------|
+| `gateway-secrets` | `GATEWAY_INTERNAL_SECRET` |
+| `hackathon-service-secrets` | `DATABASE_URL`, `GATEWAY_INTERNAL_SECRET` |
+| `jwt-service-secrets` | `DATABASE_URL`, `JWT_SECRET`, `GATEWAY_INTERNAL_SECRET` |
+| `mail-service-secrets` | `GATEWAY_INTERNAL_SECRET`; `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASSWORD` when mail is enabled |
+
+Create each Secret with `kubectl create secret generic <name> -n hackathon-research --from-literal=KEY=value`.
+Generate `JWT_SECRET` with `openssl rand -base64 32`. The database URLs should
+refer to reachable PostgreSQL instances with the required migrations applied.
+The mail service stays unready until `SMTP_HOST` is configured.
+
+Then build and deploy all Kubernetes services:
+
+```bash
+skaffold dev
+```
+
+The gateway is internal to the cluster by default. For local access, run
+`kubectl port-forward -n hackathon-research service/gateway 4000:4000`.
+
 ## Redundancy (production pattern)
 
 1. Build image from `gateway/Dockerfile`.
