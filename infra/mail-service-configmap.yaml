@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mail-service-config
+  namespace: hackathon-research
+data:
+  PORT: "4005"
+  SMTP_PORT: "587"
+  SMTP_FROM: research@localhost
+  SMTP_TLS: "true"

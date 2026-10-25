@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jwt-service
+  namespace: hackathon-research
+spec:
+  type: ClusterIP
+  selector:
+    app: jwt-service
+  ports:
+    - name: http
+      port: 4004
+      targetPort: http

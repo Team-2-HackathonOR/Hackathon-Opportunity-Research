@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: hackathon-research
+data:
+  PORT: "4000"
+  NODE_ENV: production
+  SERVICE_NAME: team-2-gateway
+  LOG_LEVEL: info
+  HACKATHON_SERVICE_URL: http://hackathon-service:4001
+  JWT_SERVICE_URL: http://jwt-service:4004
+  SCRAPER_SERVICE_URL: http://scraper:3000

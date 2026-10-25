@@ -1,4 +1,4 @@
-# Local run (gateway + hackathon-service)
+# Local run (gateway + services)
 
 ## 1. Database connection string
 
@@ -33,15 +33,17 @@ Apply `supabase/auth/001_auth.sql` on the auth project. The hackathon service us
 
 ## 3b. Mail service
 
-```powershell
-cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Team-2\services\mail-service"
-py -3 -m pip install -r requirements.txt
-$env:GATEWAY_INTERNAL_SECRET="local-dev-gateway-secret"
-$env:SMTP_HOST="smtp.example.com"
-py -3 -m uvicorn main:app --host 127.0.0.1 --port 4005
-```
+Copy `services/mail-service/.env.example` to `services/mail-service/.env`.
+Set `GATEWAY_INTERNAL_SECRET` to the same value as the gateway and configure
+your actual SMTP host and credentials. The root launcher loads this file.
 
 Set `MAIL_SERVICE_URL=http://127.0.0.1:4005` on `jwt-service`. Leave it unset to keep invite links in the API response without sending mail.
+
+## 3c. ETL service
+
+Copy `ETL/.env.example` to `ETL/.env` and configure `DATABASE_URL` for the
+research database and `MONGODB_CONNECTION_STRING` for MongoDB.
+See [ETL/Readme.md](../ETL/Readme.md) for optional AI configuration.
 
 ## 4. Gateway env
 
@@ -60,50 +62,35 @@ From repo root `Team-2`:
 
 ```powershell
 cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Team-2"
+npm install
 npm run install:all
+npm run install:python
 ```
 
-## 6. Start (three terminals — use full paths, not `...`)
+The Python setup command requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
+It selects Python 3.12 (downloading it if necessary), creates a separate `.venv`
+inside each Python service, and installs its requirements.
+The Python launch scripts use Windows virtual-environment paths.
 
-**Terminal 1 — JWT service**
+## 6. Start all services together
+
+After configuring the `.env` files and installing dependencies:
 
 ```powershell
-cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Team-2\jwt-service"
 npm run dev
 ```
 
-**Terminal 2 — hackathon service**
+The root `dev` script starts the hackathon service (4001), JWT service (4004),
+scraper (3000), gateway (4000), static client (3001), mail service (4005),
+and ETL service (8000). `concurrently` labels
+each process and stops the others if one exits. Open
+`http://localhost:3001` for the client; its `/api` requests are proxied to the
+gateway. Configure `scraper/.env` and have MongoDB available if you need scraper
+persistence.
 
-```powershell
-cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Team-2\services\hackathon-service"
-npm run dev
-```
-
-**Terminal 3 — gateway**
-
-```powershell
-cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Team-2\gateway"
-npm run dev
-```
-
-**Or from repo root:**
-
-```powershell
-cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Team-2"
-npm run dev:jwt
-# separate terminals:
-npm run dev:hackathon
-npm run dev:gateway
-```
-
-**Or auto-open three windows:**
-
-```powershell
-cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Team-2"
-.\scripts\start-dev.ps1
-```
-
-Do **not** run `npm run dev` from `Team-2` alone until `package.json` exists at root (use commands above).
+Use `npm run dev:mail` or `npm run dev:etl` to run either Python service alone.
+Both run with auto-reload and load their service-local `.env` file.
+Restart the launcher after changing environment variables.
 
 ## 7. Test via gateway
 

@@ -2,9 +2,14 @@
 
 | Service | Port | Status |
 |---------|------|--------|
-| `hackathon-service` | 4001 | Implemented — Codyza research API + Supabase |
-| `jwt-service` | 4004 | Implemented — stateless JWT login and roles |
-| `ai-service` | 4002 | Planned — analysis (draft only, human verify) |
-| `scraper-service` | 4003 | Planned — discovery leads |
+| `gateway` | 4000 | Implemented — external API entry point |
+| `hackathon-service` | 4001 | Implemented — Codyza research API + PostgreSQL |
+| `ai-service` | — | Planned — analysis (draft only, human verify) |
+| `scraper` | 3000 | Implemented — hackathon discovery and persistence |
+| `jwt-service` | 4004 | Implemented — JWT login and roles |
+| `mail-service` | 4005 | Implemented — SMTP delivery |
 
-All external traffic enters through **`gateway`** on port 4000.
+Kubernetes deployments and ClusterIP services are defined under `infra/` and
+included in the Skaffold configuration. Required credentials must be created
+as Kubernetes Secrets before deploying; see [Deployment](../docs/DEPLOYMENT.md).
+All external API traffic enters through **gateway** on port 4000.

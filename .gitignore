@@ -1,2 +1,35 @@
-hackascout-gateway/.env
-hackascout-gateway/node_modules/
+# Local environment files (keep templates)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Node dependencies and generated output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Runtime logs
+logs/
+*.log
+
+# Local Supabase CLI state
+/supabase/.temp/
+/supabase/.branches/
+
+# Operating system metadata
+.DS_Store
+Thumbs.db

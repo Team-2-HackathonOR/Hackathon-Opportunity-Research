@@ -105,3 +105,4 @@ create policy "service role full access"
   with check (true);
 
 comment on table public.hackathons is 'Codyza Team 02 Task 01 master hackathon research records';
+postgresql://postgres.tvrjainamhylqmivpxee:mqWBfEzcYuJBlair@aws-0-us-east-1.pooler.supabase.com:5432/postgres
