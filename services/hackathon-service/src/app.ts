@@ -1,5 +1,6 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { ZodError } from "zod";
 
 import { env } from "./config/env.js";
@@ -56,4 +57,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   return app;
+}
+
+let serverlessApp: Promise<FastifyInstance> | undefined;
+
+export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  serverlessApp ??= buildApp().then(async (app) => {
+    await app.ready();
+    return app;
+  });
+  const app = await serverlessApp;
+  app.server.emit("request", request, response);
 }
