@@ -1,10 +1,11 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
+import { finished } from "node:stream/promises";
 
 import type { FastifyInstance } from "fastify";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createServiceLogStream, formatReadableLogLine } from "../src/lib/logger.js";
 import { createGatewayApp } from "./create-gateway-app.js";
@@ -32,6 +33,30 @@ function captureStream(): { stream: Writable; lines: () => string[] } {
 }
 
 describe("request logging", () => {
+  it("uses stdout rather than creating a log directory on Vercel", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const warning = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const directory = join(tmpdir(), `gateway-log-test-${crypto.randomUUID()}`);
+    const captured = captureStream();
+    try {
+      const stream = createServiceLogStream({
+        nodeEnv: "production",
+        logFilePath: join(directory, "service.log"),
+        stdout: captured.stream,
+      });
+      stream.end('{"level":30,"msg":"test log"}\n');
+      await finished(stream);
+      expect(captured.lines()).toEqual(['{"level":30,"msg":"test log"}']);
+      expect(existsSync(directory)).toBe(false);
+      expect(warning).toHaveBeenCalledWith(
+        "LOG_FILE_PATH is ignored on Vercel; service logs are written to stdout.\n",
+      );
+    } finally {
+      warning.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("writes a structured line for each request", async () => {
     const captured = captureStream();
     app = await createGatewayApp({ LOG_LEVEL: "info" }, { logStream: captured.stream });

@@ -10,6 +10,22 @@ See [LOCAL-RUN.md](./LOCAL-RUN.md): start `jwt-service` (4004), `services/hackat
 docker compose up --build
 ```
 
+## Gateway on Vercel
+
+Set the Vercel project root directory to `gateway`. The `src/app.ts` default
+HTTP handler initializes Fastify once per function instance; local and Docker
+startup still use `src/index.ts`.
+
+Set `NODE_ENV=production`, `HACKATHON_SERVICE_URL`, `JWT_SERVICE_URL`, and
+`GATEWAY_INTERNAL_SECRET` in Vercel's environment settings. Use deployed backend
+base URLs, not localhost or the frontend URL. The shared secret must match the
+backend services. Omit unused optional URL variables instead of setting them
+to empty strings. Leave `LOG_FILE_PATH` unset; on Vercel it is ignored with a
+warning and logs go to stdout.
+
+Redeploy and check `/health/live` for startup and `/health/ready` for downstream
+service readiness. API routes continue to require authentication.
+
 ## Hackathon service on Vercel
 
 Set the Vercel project root directory to `services/hackathon-service`.
