@@ -21,6 +21,8 @@ Configure `DATABASE_URL`, `DATABASE_SSL=true`, and `GATEWAY_INTERNAL_SECRET`
 in Vercel's environment settings. The shared secret must match the gateway.
 Leave `LOG_FILE_PATH` unset so logs go to stdout rather than the function's
 filesystem. Redeploy after changing code or environment settings.
+On Vercel, file logging is disabled even if `LOG_FILE_PATH` is configured;
+the service emits a warning and continues logging to stdout.
 Check `/health/live` for function startup and `/health/ready` for database
 connectivity, then set the gateway's `HACKATHON_SERVICE_URL` to the deployment's
 base URL.

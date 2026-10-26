@@ -149,6 +149,11 @@ function openLogFile(logFilePath: string | undefined): WriteStream | undefined {
     return undefined;
   }
 
+  if (process.env.VERCEL === "1") {
+    process.stderr.write("LOG_FILE_PATH is ignored on Vercel; service logs are written to stdout.\n");
+    return undefined;
+  }
+
   mkdirSync(dirname(logFilePath), { recursive: true });
   const file = createWriteStream(logFilePath, { flags: "a" });
   file.on("error", (error) => {
