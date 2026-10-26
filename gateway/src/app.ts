@@ -1,4 +1,5 @@
 import { type Writable } from "node:stream";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
@@ -81,4 +82,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   return app;
+}
+
+let serverlessApp: Promise<FastifyInstance> | undefined;
+
+export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  serverlessApp ??= buildApp().then(async (app) => {
+    await app.ready();
+    return app;
+  });
+  const app = await serverlessApp;
+  app.server.emit("request", request, response);
 }
