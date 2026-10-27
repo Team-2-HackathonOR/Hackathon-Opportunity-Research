@@ -1,10 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
 import fp from "fastify-plugin";
 
-import { evaluateAccess, resetRuntimeBlocklists } from "../lib/access-control.js";
+import {
+  evaluateAccess,
+  loadAccessControlStore,
+  resetRuntimeBlocklists,
+} from "../lib/access-control.js";
 
 const accessControlPluginImpl: FastifyPluginAsync = async (app) => {
   resetRuntimeBlocklists();
+  loadAccessControlStore();
 
   app.addHook("onRequest", async (request, reply) => {
     const result = evaluateAccess(request);

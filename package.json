@@ -14,7 +14,8 @@
     "install:python": "uv venv --python 3.12 --allow-existing services/mail-service/.venv && uv pip install --python services/mail-service/.venv/Scripts/python.exe -r services/mail-service/requirements.txt && uv venv --python 3.12 --allow-existing ETL/.venv && uv pip install --python ETL/.venv/Scripts/python.exe -r ETL/requirements.txt",
     "install:all": "npm install --prefix services/hackathon-service && npm install --prefix jwt-service && npm install --prefix scraper && npm install --prefix gateway",
     "typecheck": "npm run typecheck --prefix services/hackathon-service && npm run typecheck --prefix jwt-service && npm run typecheck --prefix gateway",
-    "test": "npm test --prefix services/hackathon-service && npm test --prefix jwt-service && npm test --prefix gateway"
+    "test": "npm test --prefix services/hackathon-service && npm test --prefix jwt-service && npm test --prefix gateway",
+    "smoke": "node scripts/smoke-deploy.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

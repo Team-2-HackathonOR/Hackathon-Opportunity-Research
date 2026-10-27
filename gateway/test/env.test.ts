@@ -13,8 +13,10 @@ describe("loadEnv", () => {
     expect(env.JWT_SERVICE_URL).toBe("http://127.0.0.1:4004");
     expect(env.GATEWAY_INTERNAL_SECRET).toBeUndefined();
     expect(env.IP_BLOCKLIST).toEqual([]);
+    expect(env.PATH_ALLOWLIST).toEqual([]);
     expect(env.PATH_BLOCKLIST).toEqual([]);
     expect(env.IP_ALLOWLIST).toEqual([]);
+    expect(env.ACCESS_CONTROL_STORE_PATH).toBeUndefined();
     expect(env.AI_SERVICE_URL).toBeUndefined();
     expect(env.PROXY_GRAPHQL_UPSTREAM_URL).toBeUndefined();
     expect(env.LOG_FILE_PATH).toBeUndefined();
@@ -29,12 +31,16 @@ describe("loadEnv", () => {
     const env = loadEnv({
       PORT: "4100",
       IP_BLOCKLIST: " 203.0.113.1, , 203.0.113.2 ",
+      PATH_ALLOWLIST: "/api,/gateway",
       PATH_BLOCKLIST: "/admin,/internal",
+      ACCESS_CONTROL_STORE_PATH: " data/access-control.json ",
     });
 
     expect(env.PORT).toBe(4100);
     expect(env.IP_BLOCKLIST).toEqual(["203.0.113.1", "203.0.113.2"]);
+    expect(env.PATH_ALLOWLIST).toEqual(["/api", "/gateway"]);
     expect(env.PATH_BLOCKLIST).toEqual(["/admin", "/internal"]);
+    expect(env.ACCESS_CONTROL_STORE_PATH).toBe("data/access-control.json");
   });
 
   it("rejects a hackathon service URL that is not a URL", () => {
