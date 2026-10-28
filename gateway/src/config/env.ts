@@ -53,7 +53,15 @@ const envSchema = z.object({
 
   IP_ALLOWLIST: csvList,
   IP_BLOCKLIST: csvList,
+  PATH_ALLOWLIST: csvList,
   PATH_BLOCKLIST: csvList,
+  ACCESS_CONTROL_STORE_PATH: z
+    .string()
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : undefined;
+    }),
 
   PROXY_GRAPHQL_UPSTREAM_URL: z.string().url().optional(),
 

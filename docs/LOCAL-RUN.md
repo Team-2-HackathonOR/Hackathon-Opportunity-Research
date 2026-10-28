@@ -58,10 +58,10 @@ GATEWAY_INTERNAL_SECRET=local-dev-gateway-secret
 
 ## 5. Install dependencies (once)
 
-From repo root `Team-2`:
+From repo root `Hackathon-Opportunity-Research`:
 
 ```powershell
-cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Team-2"
+cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Hackathon-Opportunity-Research"
 npm install
 npm run install:all
 npm run install:python
@@ -93,6 +93,12 @@ Both run with auto-reload and load their service-local `.env` file.
 Restart the launcher after changing environment variables.
 
 ## 7. Test via gateway
+
+```bash
+npm run smoke
+```
+
+Or manually:
 
 ```bash
 curl http://localhost:4000/health/ready
