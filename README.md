@@ -8,4 +8,4 @@ Visitors can submit event names and websites for review. Suggestions are stored 
 
 From `gateway`, run `npm install`, configure `SUPABASE_GRAPHQL_URL` and `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_ROLE_KEY`) in `.env`, then run `npm run dev`. Open `http://localhost:3000`.
 
-Create the suggestions table by running [`gateway/event_suggestions.sql`](./gateway/event_suggestions.sql) in the Supabase SQL Editor. Review suggestions in Supabase **Table Editor**.
+Create the suggestions table by running [`gateway/event_suggestions.sql`](./gateway/event_suggestions.sql) in the Supabase SQL Editor. Review suggestions in Supabase **Table Editor**. ""
