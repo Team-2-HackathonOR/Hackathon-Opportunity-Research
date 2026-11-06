@@ -6,6 +6,16 @@ Visitors can submit event names and websites for review. Suggestions are stored 
 
 ## Run locally
 
-From `gateway`, run `npm install`, configure `SUPABASE_GRAPHQL_URL` and `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_ROLE_KEY`) in `.env`, then run `npm run dev`. Open `http://localhost:3000`.
+From `hackscout-gateway`, run `npm install`, copy `.env.example` to `.env`, configure `SUPABASE_GRAPHQL_URL` and `SUPABASE_API_KEY` with a server-side secret/service-role key, then run `npm run dev`. Open `http://localhost:3002`.
 
-Create the suggestions table by running [`gateway/event_suggestions.sql`](./gateway/event_suggestions.sql) in the Supabase SQL Editor. Review suggestions in Supabase **Table Editor**. 
+See [local setup](./docs/LOCAL-RUN.md) for the database migrations and the full service launcher, which serves the public UI on `http://localhost:3001`.
+
+## Admin moderation
+
+Open `http://localhost:3002/admin/` (also available through the public UI's Admin link). Sign in with an existing JWT account with the `admin` role. The main gateway and JWT service must be running; `AUTH_GATEWAY_URL` in `hackscout-gateway/.env` defaults to `http://127.0.0.1:4000`.
+
+Apply [`20261106170000_event_suggestion_moderation.sql`](./supabase/migrations/20261106170000_event_suggestion_moderation.sql) after the research schema and listing-access migrations. It creates or upgrades the suggestions table, adds review history, and enables atomic publication.
+
+Search and paginate pending, approved, or rejected submissions. Supply the organizer, official website, format, start date, description, and location for non-virtual events before approving. Approval publishes a listing as **Needs Confirmation** with low evidence confidence; rejection requires a reason and does not publish. Both retain the reviewer, timestamp, and review note. Reviewed submissions are read-only.
+
+Run the API and PostgreSQL moderation tests with `npm test --prefix .\hackscout-gateway`.

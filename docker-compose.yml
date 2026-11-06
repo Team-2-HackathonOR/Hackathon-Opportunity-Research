@@ -59,6 +59,9 @@ services:
     environment:
       HACKATHON_SERVICE_URL: http://hackathon-service:4001
       JWT_SERVICE_URL: http://jwt-service:4004
+      ACCESS_CONTROL_STORE_PATH: /var/lib/gateway/access-control.json
+    volumes:
+      - gateway-access-control:/var/lib/gateway
     depends_on:
       hackathon-service:
         condition: service_healthy
@@ -70,3 +73,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  gateway-access-control:

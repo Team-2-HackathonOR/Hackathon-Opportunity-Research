@@ -154,3 +154,73 @@ The live tables are `hackathon_research` in `supabase/migrations/20261020180000_
 - Follow-up statuses are `draft`, `sent`, `responded`, `closed`, and `no_response`.
 
 See `docs/RESEARCH-SOP.md` for human research standards.
+
+## Standalone HackScout moderation API
+
+This is separate from the main gateway's `/admin/*` operations above.
+Base URL: `http://localhost:3002/api/admin`. The browser UI is served at
+`http://localhost:3002/admin/`.
+
+`AUTH_GATEWAY_URL` points to the main gateway (default
+`http://127.0.0.1:4000`). Login reuses `/api/auth/login`, verifies the issued
+session through `/api/auth/me`, and denies/revokes non-admin sessions.
+All other endpoints require `Authorization: Bearer <jwt>` and recheck the
+current admin role. There is no `X-Admin-Key` fallback on these endpoints.
+Responses use `Cache-Control: no-store`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/login` | Existing `{email,password}` login; returns `{token,user}` |
+| GET | `/session` | Verified admin `{id,email,role,expiresAt}` |
+| POST | `/logout` | Revoke the current JWT; returns `{status:"signed_out"}` |
+| GET | `/suggestions` | Searchable, paginated submission queue |
+| POST | `/suggestions/:id/review` | Atomically approve/publish or reject |
+
+Queue parameters: `status=pending|approved|rejected|all` (default `pending`),
+`page` (one-based, default `1`), and `search` (event name or website, maximum
+160 characters). Returns `{items,total,page,pageSize}` with 12 items per page.
+Items include `id`, `event_name`, `website`, `status`, `submitted_at`,
+`reviewed_at`, `reviewed_by`, `review_notes`, and `published_event_id`.
+
+Approval body:
+
+```json
+{
+  "decision": "approved",
+  "notes": "Organizer website reviewed.",
+  "event": {
+    "event_name": "Community Weekend",
+    "organizer_name": "Community Builders",
+    "official_website": "https://example.com/event",
+    "format": "virtual",
+    "event_start_date": "2027-01-15",
+    "description": "Build prototypes; confirm eligibility with the organizer.",
+    "technical_tracks": "AI"
+  }
+}
+```
+
+Required fields are shown above except optional `notes` and
+`technical_tracks`. `format` accepts `in_person`, `virtual`, or `hybrid`;
+non-virtual events also require `city` and `country`. Optional fields:
+`registration_link`, `event_end_date`, `registration_fee_notes`. Dates use
+`YYYY-MM-DD`; end date must not precede start. URLs must use HTTP(S) without
+embedded credentials.
+
+Rejection body: `{"decision":"rejected","notes":"Duplicate submission."}`.
+The rejection note is required, and any event details are ignored.
+The API supplies the reviewer ID from the verified session, never from the
+request body.
+
+Returns `{id,status,published_event_id}` with string IDs; rejection has a null
+published ID. Approval creates an event with `operational_status =
+needs_confirmation` and `evidence_confidence = low`, plus an optional topic.
+Description is stored in the existing `application_requirements` field.
+Publication and review commit together; failed or duplicate publication leaves
+the submission pending.
+
+Errors return `{error}`: 400 invalid input, 401 missing/expired login, 403
+non-admin, 404 missing submission, 409 already reviewed/duplicate event,
+413 oversized body, 429 login rate limit, and 502/503 unavailable upstream
+or invalid configuration. Apply the moderation migration described in
+[local setup](./LOCAL-RUN.md) before using the queue.

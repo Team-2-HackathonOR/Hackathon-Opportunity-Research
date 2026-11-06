@@ -3,6 +3,8 @@ const OPEN_PATHS = new Set(["/health", "/health/live", "/health/ready"]);
 export const GATEWAY_CALLER = "team-2-gateway";
 export const GATEWAY_CALLER_HEADER = "x-gateway-caller";
 export const GATEWAY_SECRET_HEADER = "x-gateway-secret";
+export const USER_ID_HEADER = "x-user-id";
+export const USER_ROLE_HEADER = "x-user-role";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -37,6 +39,13 @@ export function authorizeServiceRequest(
     return {
       status: 403,
       body: { error: "Invalid team-2 gateway authorization." },
+    };
+  }
+
+  if (!headerValue(headers[USER_ID_HEADER]) || !headerValue(headers[USER_ROLE_HEADER])) {
+    return {
+      status: 403,
+      body: { error: "Gateway identity headers are required." },
     };
   }
 

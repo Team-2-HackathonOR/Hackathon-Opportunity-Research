@@ -6,7 +6,7 @@ Central entry point for Team-2. **Does not contain business logic** — it route
 
 - Request logging: readable lines in development, JSON on stdout, and an optional `LOG_FILE_PATH` copy
 - Rate limiting
-- IP/path allow & block lists
+- IP/path allow & block lists (optional `PATH_ALLOWLIST`; runtime blocks can persist via `ACCESS_CONTROL_STORE_PATH`)
 - Admin access-control APIs
 - Asks the JWT service to verify tokens against the stored row and account role, then applies role checks (`viewer`, `researcher`, `admin`)
 - Reverse proxy to:

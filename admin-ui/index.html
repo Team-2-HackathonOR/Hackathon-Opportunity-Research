@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HackScout Admin - Submission moderation</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">hackscout<span>.</span> <small>ADMIN</small></a>
+      <div class="account"><span id="account-email"></span><button id="logout" class="secondary" hidden>Sign out</button></div>
+    </header>
+    <main>
+      <div id="notification" role="status" aria-live="polite"></div>
+      <section id="login-panel" class="login panel">
+        <p class="eyebrow">ADMINISTRATOR ACCESS</p>
+        <h1>Keep the community listings trustworthy.</h1>
+        <p>Sign in with your existing HackScout admin account to review submissions and publish approved events.</p>
+        <form id="login-form">
+          <label>Email<input id="email" type="email" autocomplete="username" required maxlength="254" /></label>
+          <label>Password<input id="password" type="password" autocomplete="current-password" required maxlength="1024" /></label>
+          <button class="primary" id="login-submit" type="submit">Sign in</button>
+        </form>
+        <p class="hint">Only the admin role can access moderation. Credentials and tokens are not saved in this browser.</p>
+      </section>
+      <section id="dashboard" hidden>
+        <div class="heading">
+          <div><p class="eyebrow">COMMUNITY SUBMISSIONS</p><h1>Moderation queue</h1><p>Review organizer websites and event details before publishing.</p></div>
+          <button id="refresh" class="secondary">Refresh queue</button>
+        </div>
+        <section class="panel queue" aria-label="Submitted hackathons">
+          <div class="toolbar">
+            <label>Status<select id="status-filter"><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="all">All submissions</option></select></label>
+            <label class="search">Search submissions<input id="submission-search" type="search" maxlength="160" placeholder="Event name or website" /></label>
+            <span id="queue-count" role="status"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">User-submitted hackathons awaiting moderation</caption>
+              <thead><tr><th>Event</th><th>Submitted</th><th>Status</th><th>Action</th></tr></thead>
+              <tbody id="submission-list"></tbody>
+            </table>
+          </div>
+          <nav class="pagination" aria-label="Submission pages">
+            <button id="previous" class="secondary">Previous</button>
+            <span id="page-status" role="status"></span>
+            <button id="next" class="secondary">Next</button>
+          </nav>
+        </section>
+        <section id="review-panel" class="panel review" aria-labelledby="review-title" hidden>
+          <div class="heading"><div><p class="eyebrow">SUBMISSION REVIEW</p><h2 id="review-title" tabindex="-1"></h2></div><button id="close-review" class="secondary">Close review</button></div>
+          <p id="submission-details"></p>
+          <p><a id="submitted-website" target="_blank" rel="noopener noreferrer">Open submitted website</a></p>
+          <div id="review-history" hidden></div>
+          <form id="review-form">
+            <p class="review-notice">Approval publishes this event immediately as <strong>Needs Confirmation</strong> with low evidence confidence. It does not claim verified eligibility or organizer rules.</p>
+            <div class="form-grid">
+              <label>Event name<input name="event_name" required maxlength="160" /></label>
+              <label>Organizer<input name="organizer_name" required maxlength="160" /></label>
+              <label>Official website<input name="official_website" type="url" required maxlength="2048" /></label>
+              <label>Registration link <small>(optional)</small><input name="registration_link" type="url" maxlength="2048" /></label>
+              <label>Format<select name="format" required><option value="">Choose format</option><option value="in_person">In-person</option><option value="virtual">Virtual</option><option value="hybrid">Hybrid</option></select></label>
+              <label>Topics <small>(optional)</small><input name="technical_tracks" maxlength="1000" placeholder="AI, climate, health..." /></label>
+              <label>Start date<input name="event_start_date" type="date" required /></label>
+              <label>End date <small>(optional)</small><input name="event_end_date" type="date" /></label>
+              <label>City <small>(required unless virtual)</small><input name="city" maxlength="160" /></label>
+              <label>Country <small>(required unless virtual)</small><input name="country" maxlength="160" /></label>
+              <label class="wide">Description and participation requirements<textarea name="description" required maxlength="4000" rows="4" placeholder="Summarize the event and any confirmed participation requirements."></textarea></label>
+              <label class="wide">Fee details <small>(optional)</small><input name="registration_fee_notes" maxlength="500" placeholder="Free, paid, or not confirmed" /></label>
+            </div>
+            <label>Review note <small>(required for rejection)</small><textarea id="review-notes" maxlength="2000" rows="3" placeholder="Why this submission should be published or rejected"></textarea></label>
+            <div class="review-actions">
+              <button id="approve" class="primary" type="submit">Approve &amp; publish</button>
+              <button id="reject" class="danger" type="button">Reject submission</button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+    <footer>HackScout moderation &middot; <a href="/">Return to public listings</a></footer>
+  </body>
+</html>

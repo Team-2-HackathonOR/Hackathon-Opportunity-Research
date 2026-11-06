@@ -25,17 +25,20 @@
 
     <main>
       <section class="hero" id="discover">
+        <div class="hero-background" aria-hidden="true"></div>
         <div class="hero-decoration decoration-one"></div><div class="hero-decoration decoration-two"></div>
         <div class="hero-content">
           <div class="hero-kicker"><span class="kicker-spark">✳</span> FOR BUILDERS, DREAMERS & DOERS</div>
           <h1>Your next big idea<br />starts <em>here.</em></h1>
           <p class="hero-subtitle">Find hackathons that match your interests, your schedule, and the way you want to build.</p>
           <form class="search-panel" id="search-form">
-            <label class="search-field keyword-field"><span class="field-icon">⌕</span><span class="field-copy"><small>WHAT ARE YOU INTO?</small><input id="keyword-input" type="search" placeholder="Try “AI”, climate, fintech..." /></span></label>
+            <div class="search-field keyword-field"><span class="field-icon">⌕</span><div class="field-copy"><label for="keyword-input">WHAT ARE YOU INTO?</label><input id="keyword-input" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="search-suggestions" autocomplete="off" placeholder="Try “AI”, climate, fintech..." /></div><ul id="search-suggestions" class="search-suggestions" role="listbox" aria-label="Search suggestions" hidden></ul></div>
             <span class="search-divider"></span>
             <label class="search-field location-field"><span class="field-icon pin-icon">⌖</span><span class="field-copy"><small>WHERE?</small><input id="location-input" type="search" placeholder="City or online" /></span>
               <button type="button" class="location-button" id="online-toggle" aria-label="Toggle online events">◎</button>
             </label>
+            <span class="search-divider"></span>
+            <label class="search-field date-field"><span class="field-icon" aria-hidden="true">▦</span><span class="field-copy"><small>WHEN?</small><input id="date-input" type="date" aria-label="Event date" /></span></label>
             <button class="search-submit" type="submit">Find events <span>→</span></button>
           </form>
           <div class="hero-bottom"><span>Popular:</span><button class="popular-tag" data-topic="AI">AI & machine learning</button><button class="popular-tag" data-topic="Climate">Climate tech</button><button class="popular-tag" data-topic="Beginner">Beginner-friendly</button><button class="popular-tag" data-topic="Virtual">Online</button></div>
@@ -65,7 +68,7 @@
             <div><h3 id="results-title">Upcoming hackathons <span id="result-count"></span></h3><p id="results-description">Fresh opportunities to learn, create, and meet your people.</p></div>
             <div class="toolbar-controls">
               <button class="filter-button" id="filters-toggle" aria-expanded="false" aria-controls="filter-panel"><span>☷</span> Filters <span class="filter-count" id="filter-count"></span></button>
-              <label class="sort-control"><input id="include-closed" type="checkbox" /> Include closed <span id="closed-count"></span></label>
+              <label class="sort-control"><input id="include-closed" type="checkbox" checked /> Include closed <span id="closed-count"></span></label>
               <label class="sort-control">Sort by <select id="sort-select"><option value="soonest">Soonest</option><option value="latest">Latest</option><option value="name">Name A–Z</option></select></label>
             </div>
           </div>
@@ -97,7 +100,12 @@
           </div>
           <div class="event-grid" id="event-grid"></div>
           <div class="no-results" id="no-results" hidden><span>⌕</span><h3>No events found</h3><p>Try a different search or clear your filters to see more opportunities.</p><button id="reset-search">Clear search & filters</button></div>
-          <button class="load-more" id="load-more">Show all events <span>↓</span></button>
+          <nav class="pagination" id="pagination" aria-label="Event pages" hidden>
+            <button type="button" id="previous-page" aria-controls="event-grid">Previous</button>
+            <label>Page <select id="page-select" aria-label="Event page" aria-controls="event-grid"></select></label>
+            <span id="page-status" role="status"></span>
+            <button type="button" id="next-page" aria-controls="event-grid">Next</button>
+          </nav>
         </section>
       </section>
 
@@ -109,7 +117,7 @@
       <section class="submit-section" id="list-event"><div><div class="eyebrow">GOT AN EVENT COMING UP?</div><h2>Bring the builders together.</h2><p>Help more people find your hackathon.</p></div><button class="submit-button" id="suggest-event">Suggest an event <span>↗</span></button></section>
     </main>
 
-    <footer class="site-footer"><a class="brand footer-brand" href="#"><span class="brand-symbol"><i></i><i></i><i></i></span><span>hackscout<span class="brand-period">.</span></span></a><span>Powered by Codyza</span><span>© 2026 HackScout <a href="#discover">Back to top ↑</a></span></footer>
+    <footer class="site-footer"><a class="brand footer-brand" href="#"><span class="brand-symbol"><i></i><i></i><i></i></span><span>hackscout<span class="brand-period">.</span></span></a><span>Powered by Codyza</span><span>© 2026 HackScout <a href="/admin/">Admin</a> <a href="#discover">Back to top ↑</a></span></footer>
 
     <div class="modal-backdrop" id="event-modal" aria-hidden="true"><section class="event-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-close" id="modal-close" aria-label="Close">×</button><div id="modal-content"></div></section></div>
     <script src="app.js"></script>

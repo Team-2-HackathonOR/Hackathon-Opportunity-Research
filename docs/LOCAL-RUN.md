@@ -56,12 +56,21 @@ JWT_SERVICE_URL=http://127.0.0.1:4004
 GATEWAY_INTERNAL_SECRET=local-dev-gateway-secret
 ```
 
+The standalone HackScout API reads from Supabase GraphQL. Copy
+`hackscout-gateway/.env.example` to `hackscout-gateway/.env`, set
+`SUPABASE_GRAPHQL_URL` and `SUPABASE_API_KEY` to a server-side Supabase
+secret/service-role key, and leave `PORT=3002`. Never use or expose a
+publishable key or commit the secret. In Supabase API settings, add
+`hackathon_research` to the exposed schemas, then apply the
+`20261106090000_hackathon_graphql_access.sql` migration to grant the API role
+read access to the listing tables.
+
 ## 5. Install dependencies (once)
 
-From repo root `Team-2`:
+From repo root `Hackathon-Opportunity-Research`:
 
 ```powershell
-cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Team-2"
+cd "D:\AIWorks\Codyza\HACKATHON OPPORTUNITY RESEARCH\Hackathon-Opportunity-Research"
 npm install
 npm run install:all
 npm run install:python
@@ -81,18 +90,89 @@ npm run dev
 ```
 
 The root `dev` script starts the hackathon service (4001), JWT service (4004),
-scraper (3000), gateway (4000), static client (3001), mail service (4005),
-and ETL service (8000). `concurrently` labels
+scraper (3000), main gateway (4000), standalone HackScout API (3002), static
+client (3001), mail service (4005), and ETL service (8000). `concurrently` labels
 each process and stops the others if one exits. Open
 `http://localhost:3001` for the client; its `/api` requests are proxied to the
-gateway. Configure `scraper/.env` and have MongoDB available if you need scraper
-persistence.
+standalone HackScout API. Configure `scraper/.env` and have MongoDB available
+if you need scraper persistence.
+
+The client shows six events per page, including closed listings by default.
+Use Previous, Next, or the page selector to browse every matching event.
+Keyword search covers all loaded events, not just the current page; suggestions
+offer event names, organizers, locations, and topics as you type. Changing a
+search, filter, or sort returns to page one. Click anywhere on an event card
+to open its details; the Save button remains independent.
+The search dropdown updates on each keystroke; use Up/Down and Enter or click
+a suggestion to select it, and Escape to dismiss it. The date picker filters
+events happening on that day, including multi-day events spanning that date.
+Clearing search and filters also clears the selected date.
+Cards and detail headers use a distinct color for each topic, with the first
+matching category determining the theme for multi-topic events. A visible
+topic label identifies the type without relying on color; uncategorized
+events use a neutral theme.
+Card ribbons and detail headers also display topic-specific illustrations
+from the local `hackscout-ui/assets/event-topics.png` sprite sheet. All 15
+topics and the general-event fallback have their own image.
+
+### Admin submission moderation
+
+Open `http://localhost:3002/admin/` directly, or `http://localhost:3001/admin/`
+through the static client's proxy. The public footer includes an Admin link.
+Sign in with an existing account whose JWT role is `admin`; viewer and
+researcher accounts cannot access the moderation API. Configure
+`AUTH_GATEWAY_URL=http://127.0.0.1:4000` in `hackscout-gateway/.env` when the
+authentication gateway runs at a different address. Both the main gateway
+and JWT service must be available. No new admin password or separate login
+database is introduced.
+
+On the research Supabase project, apply these migrations in order:
+
+1. [`20261020180000_hackathon_research.sql`](../supabase/migrations/20261020180000_hackathon_research.sql)
+2. [`20261106090000_hackathon_graphql_access.sql`](../supabase/migrations/20261106090000_hackathon_graphql_access.sql)
+3. [`20261106170000_event_suggestion_moderation.sql`](../supabase/migrations/20261106170000_event_suggestion_moderation.sql)
+
+The last migration creates or upgrades `public.event_suggestions`, preserving
+existing submissions. Keep `public` exposed to the Supabase REST API and
+`hackathon_research` exposed for listing queries. The service-role key remains
+only on the standalone API server. Browser requests use the existing JWT;
+the API checks its current admin role for every moderation operation.
+
+The queue supports status filters, event-name/website search, and 12 submissions
+per page. Before approval, supply event name, organizer, official HTTP(S)
+website, format, start date, and description. In-person and hybrid events
+also require city and country. Optional fields include end date, registration
+link, topics, and fee details. An end date cannot precede the start date.
+Approval publishes the listing and records the review in one database
+transaction as **Needs Confirmation** with low confidence, not verified
+eligibility. Refresh public listings to see newly published events.
+
+Rejection requires a review note and never creates a listing. Approved and
+rejected submissions retain reviewer ID, timestamp, note, and any published
+event ID in a read-only history view. Duplicate publication and attempts to
+review an already-reviewed submission return an actionable conflict.
+The admin token is held only in page memory; refreshing requires signing in
+again, and Sign out revokes the session through the existing authentication
+gateway.
+
+Run the protected API and embedded PostgreSQL migration tests without touching
+the live database:
+
+```powershell
+npm test --prefix .\hackscout-gateway
+```
 
 Use `npm run dev:mail` or `npm run dev:etl` to run either Python service alone.
 Both run with auto-reload and load their service-local `.env` file.
 Restart the launcher after changing environment variables.
 
 ## 7. Test via gateway
+
+```bash
+npm run smoke
+```
+
+Or manually:
 
 ```bash
 curl http://localhost:4000/health/ready
