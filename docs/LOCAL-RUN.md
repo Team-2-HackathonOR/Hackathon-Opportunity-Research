@@ -56,6 +56,15 @@ JWT_SERVICE_URL=http://127.0.0.1:4004
 GATEWAY_INTERNAL_SECRET=local-dev-gateway-secret
 ```
 
+The standalone HackScout API reads from Supabase GraphQL. Copy
+`hackscout-gateway/.env.example` to `hackscout-gateway/.env`, set
+`SUPABASE_GRAPHQL_URL` and `SUPABASE_API_KEY` to a server-side Supabase
+secret/service-role key, and leave `PORT=3002`. Never use or expose a
+publishable key or commit the secret. In Supabase API settings, add
+`hackathon_research` to the exposed schemas, then apply the
+`20261106090000_hackathon_graphql_access.sql` migration to grant the API role
+read access to the listing tables.
+
 ## 5. Install dependencies (once)
 
 From repo root `Team-2`:
@@ -81,12 +90,30 @@ npm run dev
 ```
 
 The root `dev` script starts the hackathon service (4001), JWT service (4004),
-scraper (3000), gateway (4000), static client (3001), mail service (4005),
-and ETL service (8000). `concurrently` labels
+scraper (3000), main gateway (4000), standalone HackScout API (3002), static
+client (3001), mail service (4005), and ETL service (8000). `concurrently` labels
 each process and stops the others if one exits. Open
 `http://localhost:3001` for the client; its `/api` requests are proxied to the
-gateway. Configure `scraper/.env` and have MongoDB available if you need scraper
-persistence.
+standalone HackScout API. Configure `scraper/.env` and have MongoDB available
+if you need scraper persistence.
+
+The client shows six events per page, including closed listings by default.
+Use Previous, Next, or the page selector to browse every matching event.
+Keyword search covers all loaded events, not just the current page; suggestions
+offer event names, organizers, locations, and topics as you type. Changing a
+search, filter, or sort returns to page one. Click anywhere on an event card
+to open its details; the Save button remains independent.
+The search dropdown updates on each keystroke; use Up/Down and Enter or click
+a suggestion to select it, and Escape to dismiss it. The date picker filters
+events happening on that day, including multi-day events spanning that date.
+Clearing search and filters also clears the selected date.
+Cards and detail headers use a distinct color for each topic, with the first
+matching category determining the theme for multi-topic events. A visible
+topic label identifies the type without relying on color; uncategorized
+events use a neutral theme.
+Card ribbons and detail headers also display topic-specific illustrations
+from the local `hackscout-ui/assets/event-topics.png` sprite sheet. All 15
+topics and the general-event fallback have their own image.
 
 Use `npm run dev:mail` or `npm run dev:etl` to run either Python service alone.
 Both run with auto-reload and load their service-local `.env` file.
