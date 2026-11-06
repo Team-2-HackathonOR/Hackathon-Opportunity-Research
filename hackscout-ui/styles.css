@@ -8,6 +8,9 @@
 @media(max-width:900px){.filter-panel.open{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:650px){.filter-panel.open{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 8px}.filter-panel-footer{align-items:flex-start}.filter-panel-footer>span{line-height:1.5}}
 #event-grid[hidden],#pagination[hidden]{display:none}
+#app[hidden]{display:none}
+#auth-check{padding:24px;color:#17233c;font:500 15px "DM Sans",sans-serif}
+#account-logout[hidden]{display:none}
 .pagination{display:flex;justify-content:center;align-items:center;gap:12px;flex-wrap:wrap;margin:24px 0;color:#545b6d;font-size:12px}
 .pagination button,.pagination select{padding:8px 12px;border:1px solid #e2e5eb;border-radius:4px;background:white;color:#7259dc;font:inherit}
 .pagination button:not(:disabled),.pagination select{cursor:pointer}

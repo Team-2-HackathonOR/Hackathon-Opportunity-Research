@@ -1,0 +1,21 @@
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17233c;background:#f4f6fa;font-size:15px}
+*{box-sizing:border-box}
+body{margin:0}
+header{background:#17233c;padding:22px max(24px,calc((100vw - 1180px)/2))}
+header a{color:white;text-decoration:none;font-size:24px;font-weight:800;letter-spacing:-1px}
+header span{color:#d9f16b}
+main{padding:24px}
+.panel{max-width:540px;margin:50px auto;background:#fff;border:1px solid #e0e5ef;border-radius:12px;padding:28px;box-shadow:0 5px 18px #17233c05}
+.eyebrow{font-size:11px;font-weight:750;letter-spacing:1.8px;color:#7250c5}
+h1{font-size:clamp(25px,4vw,36px);letter-spacing:-1px;margin:8px 0 12px}
+p{line-height:1.6;color:#566278}
+form{display:grid;gap:18px;margin:24px 0}
+label{display:grid;gap:7px;font-size:13px;font-weight:650;color:#35415a}
+input{width:100%;border:1px solid #c9d2e2;border-radius:6px;padding:11px 12px;font:inherit}
+button{border:0;border-radius:6px;padding:12px;background:#d9f16b;color:#17233c;font-weight:700;cursor:pointer}
+button:disabled{opacity:.55;cursor:not-allowed}
+a{color:#5538b9}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #8261df;outline-offset:3px}
+.hint{font-size:12px;color:#657088}
+#notification:not(:empty){padding:12px;border-radius:6px;background:#fff0f1;color:#992b3f}
+@media(max-width:650px){main{padding:14px}.panel{margin:24px auto;padding:20px}}

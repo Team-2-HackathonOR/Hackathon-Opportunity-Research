@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in - HackScout</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header><a href="/">hackscout<span>.</span></a></header>
+    <main>
+      <section class="panel">
+        <p class="eyebrow">WELCOME BACK</p>
+        <h1>Sign in to HackScout.</h1>
+        <p>Use your existing account to continue.</p>
+        <p id="notification" role="status" aria-live="polite"></p>
+        <form id="login-form">
+          <label>Email<input id="email" type="email" autocomplete="username" maxlength="254" required /></label>
+          <label>Password<input id="password" type="password" autocomplete="current-password" maxlength="1024" required /></label>
+          <button id="submit" type="submit">Sign in</button>
+        </form>
+        <p class="hint">Your session stays in this browser tab until you sign out or close it.</p>
+      </section>
+    </main>
+  </body>
+</html>

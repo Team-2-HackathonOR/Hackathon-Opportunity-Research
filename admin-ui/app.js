@@ -31,6 +31,7 @@ function notify(message, error = false) {
 
 function signOut() {
   token = "";
+  sessionStorage.removeItem("hackscout.jwt");
   queueController?.abort();
   clearTimeout(searchTimer);
   submissions = [];
@@ -197,6 +198,7 @@ $("#login-form").addEventListener("submit", async (event) => {
     });
     if (!session.token || session.user?.role !== "admin") throw new Error("An administrator account is required.");
     token = session.token;
+    sessionStorage.setItem("hackscout.jwt", token);
     $("#password").value = "";
     $("#account-email").textContent = session.user.email;
     $("#login-panel").hidden = true;
@@ -241,3 +243,33 @@ $("#next").addEventListener("click", () => { page += 1; closeReview(); loadQueue
 $("#close-review").addEventListener("click", closeReview);
 $("#review-form").addEventListener("submit", (event) => { event.preventDefault(); review("approved"); });
 $("#reject").addEventListener("click", () => review("rejected"));
+
+async function restoreSession() {
+  const savedToken = sessionStorage.getItem("hackscout.jwt");
+  if (!savedToken) return;
+  try {
+    const response = await fetch("/api/admin/session", {
+      headers: { Authorization: `Bearer ${savedToken}` },
+    });
+    const user = await response.json();
+    if (!response.ok) {
+      if (response.status === 401) sessionStorage.removeItem("hackscout.jwt");
+      throw new Error(user.error || `Session verification failed (HTTP ${response.status}).`);
+    }
+    if (user.role !== "admin" || typeof user.email !== "string") {
+      throw new Error("The authentication service returned an invalid session.");
+    }
+    token = savedToken;
+    $("#account-email").textContent = user.email;
+    $("#login-panel").hidden = true;
+    $("#dashboard").hidden = false;
+    $("#logout").hidden = false;
+    notify("Signed in. Select a submission to review.");
+    await loadQueue();
+  } catch (error) {
+    console.error("Could not restore admin session:", error);
+    notify(error.message || "Could not restore the admin session.", true);
+  }
+}
+
+restoreSession();

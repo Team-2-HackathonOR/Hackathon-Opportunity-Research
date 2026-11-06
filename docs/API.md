@@ -155,6 +155,14 @@ The live tables are `hackathon_research` in `supabase/migrations/20261020180000_
 
 See `docs/RESEARCH-SOP.md` for human research standards.
 
+## Standalone HackScout API
+
+The standalone gateway's `GET /api/hackathons` and `POST /api/suggestions`
+require a valid JWT in the `Authorization: Bearer <token>` header. The gateway
+checks each request against the main gateway's `/api/auth/me`; missing or
+expired sessions return 401, and authentication-service failures return 502.
+`GET /api/health` remains available for health checks.
+
 ## Standalone HackScout moderation API
 
 This is separate from the main gateway's `/admin/*` operations above.

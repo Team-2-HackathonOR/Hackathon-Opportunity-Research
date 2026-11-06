@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const path = require("node:path");
 const { createAdminRouter } = require("./admin");
+const { createAuthRouter, requireSession } = require("./auth");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -265,7 +266,7 @@ app.get("/api/health", async (_request, response, next) => {
   }
 });
 
-app.get("/api/hackathons", async (_request, response, next) => {
+app.get("/api/hackathons", requireSession, async (_request, response, next) => {
   try {
     response.json(await getEvents());
   } catch (error) {
@@ -273,7 +274,7 @@ app.get("/api/hackathons", async (_request, response, next) => {
   }
 });
 
-app.post("/api/suggestions", express.json({ limit: "10kb" }), async (request, response, next) => {
+app.post("/api/suggestions", requireSession, express.json({ limit: "10kb" }), async (request, response, next) => {
   const eventName = typeof request.body?.event === "string" ? request.body.event.trim() : "";
   const website = typeof request.body?.website === "string" ? request.body.website.trim() : "";
   let parsedWebsite;
@@ -318,7 +319,9 @@ app.post("/api/suggestions", express.json({ limit: "10kb" }), async (request, re
   }
 });
 
+app.use("/api/auth", createAuthRouter());
 app.use("/api/admin", createAdminRouter(getSupabaseConfig));
+app.use("/login", express.static(path.join(__dirname, "..", "login-ui")));
 app.use("/admin", express.static(path.join(__dirname, "..", "admin-ui")));
 app.use(express.static(path.join(__dirname, "..", "hackscout-ui")));
 

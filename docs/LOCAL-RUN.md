@@ -91,10 +91,11 @@ npm run dev
 
 The root `dev` script starts the hackathon service (4001), JWT service (4004),
 scraper (3000), main gateway (4000), standalone HackScout API (3002), static
-client (3001), mail service (4005), and ETL service (8000). `concurrently` labels
-each process and stops the others if one exits. Open
-`http://localhost:3001` for the client; its `/api` requests are proxied to the
-standalone HackScout API. Configure `scraper/.env` and have MongoDB available
+client (3001), admin UI (3003), mail service (4005), and ETL service (8000).
+`concurrently` labels each process and stops the others if one exits. Open
+`http://localhost:3001` for the client or `http://localhost:3003` for the admin
+UI; their `/api` requests are proxied to the standalone HackScout API.
+Configure `scraper/.env` and have MongoDB available
 if you need scraper persistence.
 
 The client shows six events per page, including closed listings by default.
@@ -117,7 +118,16 @@ topics and the general-event fallback have their own image.
 
 ### Admin submission moderation
 
-Open `http://localhost:3002/admin/` directly, or `http://localhost:3001/admin/`
+The application redirects users without a valid session to general sign-in at
+`http://localhost:3001/login/` or `http://localhost:3002/login/`. It uses the JWT service through the main
+gateway. Admins are redirected to moderation; viewers and researchers return to
+the public UI. The JWT is kept in session storage for the current browser tab;
+sign out or close the tab to remove it. Listings and suggestions require a
+valid JWT checked by the server; static UI files are not private. Browser storage is isolated by origin,
+so keep using the same port when navigating between login and moderation.
+
+Open `http://localhost:3003` through the full service launcher,
+`http://localhost:3002/admin/` directly, or `http://localhost:3001/admin/`
 through the static client's proxy. The public footer includes an Admin link.
 Sign in with an existing account whose JWT role is `admin`; viewer and
 researcher accounts cannot access the moderation API. Configure
