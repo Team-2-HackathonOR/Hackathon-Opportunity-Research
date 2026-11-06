@@ -22,4 +22,4 @@ Apply [`20261106170000_event_suggestion_moderation.sql`](./supabase/migrations/2
 
 Search and paginate pending, approved, or rejected submissions. Supply the organizer, official website, format, start date, description, and location for non-virtual events before approving. Approval publishes a listing as **Needs Confirmation** with low evidence confidence; rejection requires a reason and does not publish. Both retain the reviewer, timestamp, and review note. Reviewed submissions are read-only.
 
-Run the API and PostgreSQL moderation tests with `npm test --prefix .\hackscout-gateway`.
+Run the API and PostgreSQL moderation tests with `npm test --prefix .\hackscout-gateway`. """"
