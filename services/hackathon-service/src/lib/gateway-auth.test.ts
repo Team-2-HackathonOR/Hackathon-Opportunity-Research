@@ -4,6 +4,13 @@ import { authorizeServiceRequest } from "./gateway-auth.js";
 
 const secret = "test-gateway-secret-value";
 
+const gatewayIdentity = {
+  "x-gateway-caller": "team-2-gateway",
+  "x-gateway-secret": secret,
+  "x-user-id": "11111111-1111-1111-1111-111111111111",
+  "x-user-role": "viewer",
+};
+
 describe("authorizeServiceRequest", () => {
   it("leaves health routes open", () => {
     expect(authorizeServiceRequest("/health", {}, undefined)).toBeNull();
@@ -36,13 +43,20 @@ describe("authorizeServiceRequest", () => {
     ).toMatchObject({ status: 403 });
   });
 
-  it("accepts a gateway call with the shared secret", () => {
+  it("rejects a gateway call that is missing user identity headers", () => {
     expect(
       authorizeServiceRequest(
-        "/api/hackathons?limit=1",
+        "/api/hackathons",
         { "x-gateway-caller": "team-2-gateway", "x-gateway-secret": secret },
         secret,
       ),
-    ).toBeNull();
+    ).toEqual({
+      status: 403,
+      body: { error: "Gateway identity headers are required." },
+    });
+  });
+
+  it("accepts a gateway call with the shared secret and user identity", () => {
+    expect(authorizeServiceRequest("/api/hackathons?limit=1", gatewayIdentity, secret)).toBeNull();
   });
 });

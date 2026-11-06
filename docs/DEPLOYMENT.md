@@ -99,17 +99,30 @@ The gateway is internal to the cluster by default. For local access, run
 ## Redundancy (production pattern)
 
 1. Build image from `gateway/Dockerfile`.
-2. Run **2+ replicas** behind a load balancer (Railway, Render, AWS ALB, etc.).
-3. Configure LB health check: `GET /health/ready`.
+2. Run **2+ replicas** behind a load balancer (Railway, Render, AWS ALB, etc.). Kubernetes sets `replicas: 2` on `infra/gateway-deployment.yaml`.
+3. Configure LB health check: `GET /health/ready` (liveness: `GET /health/live`).
 4. Gateway replicas share the same downstream URLs (`HACKATHON_SERVICE_URL`, etc.).
 5. Hackathon-service replicas share the same `DATABASE_URL` (PostgreSQL).
-6. Set `ADMIN_API_KEY`, rate limits, and optional `IP_ALLOWLIST`.
+6. Set `ADMIN_API_KEY`, rate limits, and optional `IP_ALLOWLIST` / `PATH_ALLOWLIST` / `PATH_BLOCKLIST` in the shared ConfigMap or env so every replica starts with the same rules.
+7. For admin API blocklists that must survive restarts and stay aligned across replicas, set `ACCESS_CONTROL_STORE_PATH` to a JSON file on a shared volume (Docker Compose mounts `gateway-access-control`; on Kubernetes use a ReadWriteMany PVC). Without that path, runtime blocks stay in memory on one process.
+
+## Post-deploy smoke test
+
+After the gateway is reachable:
+
+```bash
+npm run smoke
+# or
+GATEWAY_BASE_URL=https://your-gateway.example.com npm run smoke
+```
+
+The script checks liveness, readiness, login, a protected hackathon call through the gateway, and a rejected bad password. See [scripts/smoke-deploy.mjs](../scripts/smoke-deploy.mjs).
 
 ## Environment variables
 
 See root `.env.example`, `gateway/.env.example` (if present), `services/hackathon-service/.env.example`, and `.env.production.example`.
 
-**Gateway:** `HACKATHON_SERVICE_URL`, `JWT_SERVICE_URL`, `GATEWAY_INTERNAL_SECRET`, `PORT`, `ADMIN_API_KEY` (no database credentials and no JWT signing secret). Optional `LOG_FILE_PATH` for a local JSON log file. Leave it unset in containers.
+**Gateway:** `HACKATHON_SERVICE_URL`, `JWT_SERVICE_URL`, `GATEWAY_INTERNAL_SECRET`, `PORT`, `ADMIN_API_KEY` (no database credentials and no JWT signing secret). Optional `LOG_FILE_PATH` for a local JSON log file. Leave it unset in containers. Optional `PATH_ALLOWLIST`, `PATH_BLOCKLIST`, `IP_ALLOWLIST`, `IP_BLOCKLIST`, and `ACCESS_CONTROL_STORE_PATH` for access control.
 
 Apply `supabase/migrations/20261020180000_hackathon_research.sql` after the earlier migrations, then `supabase/migrations/20261021140000_app_users.sql` and `supabase/migrations/20261021180000_invitations.sql`. The API reads and writes schema `hackathon_research`. The earlier `public.hackathons` scripts are the retired flat table.
 
