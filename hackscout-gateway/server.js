@@ -186,18 +186,14 @@ function mapEvent(event) {
 }
 
 async function querySupabaseGraphql(query, variables = {}) {
-  const endpoint = process.env.SUPABASE_GRAPHQL_URL;
-  const secretKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!endpoint || !secretKey) {
-    throw new Error("Set SUPABASE_GRAPHQL_URL and SUPABASE_SECRET_KEY in the gateway environment.");
-  }
+  const { endpoint, secretKey } = getSupabaseConfig();
 
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      apikey: secretKey
+      apikey: secretKey,
+      "Accept-Profile": "hackathon_research"
     },
     body: JSON.stringify({ query, variables }),
     signal: AbortSignal.timeout(15000)
@@ -214,6 +210,22 @@ async function querySupabaseGraphql(query, variables = {}) {
   }
 
   return result.data;
+}
+
+function getSupabaseConfig() {
+  const endpoint = process.env.SUPABASE_GRAPHQL_URL;
+  const apiKey = process.env.SUPABASE_API_KEY ||
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!endpoint || !apiKey) {
+    throw new Error("Set SUPABASE_GRAPHQL_URL and SUPABASE_API_KEY in the gateway environment.");
+  }
+  if (apiKey.startsWith("sb_publishable_")) {
+    throw new Error("SUPABASE_API_KEY must be a server-side Supabase secret/service-role key; publishable keys cannot access the research schema.");
+  }
+
+  return { endpoint, secretKey: apiKey };
 }
 
 async function getEvents() {
@@ -277,12 +289,7 @@ app.post("/api/suggestions", express.json({ limit: "10kb" }), async (request, re
   }
 
   try {
-    const graphqlEndpoint = process.env.SUPABASE_GRAPHQL_URL;
-    const secretKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!graphqlEndpoint || !secretKey) {
-      throw new Error("Set SUPABASE_GRAPHQL_URL and SUPABASE_SECRET_KEY in the gateway environment.");
-    }
+    const { endpoint: graphqlEndpoint, secretKey } = getSupabaseConfig();
 
     const projectUrl = new URL(graphqlEndpoint);
     if (projectUrl.protocol !== "https:") {
@@ -310,7 +317,7 @@ app.post("/api/suggestions", express.json({ limit: "10kb" }), async (request, re
   }
 });
 
-app.use(express.static(path.join(__dirname, "..", "client", "public")));
+app.use(express.static(path.join(__dirname, "..", "hackscout-ui")));
 
 app.use((error, _request, response, _next) => {
   console.error("Request failed:", error);

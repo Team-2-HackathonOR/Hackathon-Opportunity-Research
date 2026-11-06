@@ -4,8 +4,12 @@ let listingsError = false;
 const saved = new Set(JSON.parse(localStorage.getItem("hackscout-saved") || "[]"));
 let activeCategory = "All";
 let savedOnly = false;
-let visibleCount = 6;
+const pageSize = 6;
+let currentPage = 1;
 let showMoreCategories = false;
+let searchSuggestions = [];
+let matchingSuggestions = [];
+let activeSuggestion = -1;
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => document.querySelectorAll(selector);
 
@@ -44,20 +48,20 @@ function mapHackathon(row) {
   ].filter(Boolean).join(" ");
   const categoryRules = [
     { name: "AI", pattern: /\b(ai|artificial intelligence|machine learning|data science|data analytics|data visualization|predictive analytics|natural language processing|computer vision)\b/i, art: "art-ai" },
-    { name: "VR/AR", pattern: /\b(vr|virtual reality|augmented reality|mixed reality|extended reality|xr)\b/i, art: "art-web" },
+    { name: "VR/AR", pattern: /\b(vr|virtual reality|augmented reality|mixed reality|extended reality|xr)\b/i, art: "art-vr" },
     { name: "Climate", pattern: /\b(climate|sustainability|sustainable|clean energy|renewable energy|environment|environmental|conservation|water quality|agriculture)\b/i, art: "art-climate" },
     { name: "Health", pattern: /\b(health|healthcare|medical|wellness|biotech|biomedical|public health|patient|disease|fitness)\b/i, art: "art-health" },
-    { name: "Gaming", pattern: /\b(gaming|games?|video game|game development|game design|interactive game)\b/i, art: "art-web" },
+    { name: "Gaming", pattern: /\b(gaming|games?|video game|game development|game design|interactive game)\b/i, art: "art-gaming" },
     { name: "Social impact", pattern: /\b(social impact|social good|civic|community|communities|accessibility|public service|underserved|nonprofit|justice)\b/i, art: "art-civic" },
     { name: "Web3", pattern: /\b(web3|blockchain|crypto|decentralized)\b/i, art: "art-web" },
-    { name: "Cybersecurity", pattern: /\b(cybersecurity|cyber security|information security|data protection|privacy|fraud prevention)\b/i, art: "art-web" },
-    { name: "Education", pattern: /\b(education|educational|learning|edtech|classroom|curriculum|literacy|teaching)\b/i, art: "art-web" },
-    { name: "Fintech", pattern: /\b(fintech|finance|financial|payments|banking|insurance)\b/i, art: "art-web" },
-    { name: "Robotics & hardware", pattern: /\b(robotics|robot|hardware|embedded systems|iot|internet of things|sensors?|wearables?|connected devices?)\b/i, art: "art-web" },
-    { name: "Apps & software", pattern: /\b(app development|application development|mobile apps?|software development|web development|app challenge)\b/i, art: "art-web" },
-    { name: "Science & research", pattern: /\b(science|scientific|research|laboratory|laboratories|clinical research)\b/i, art: "art-web" },
-    { name: "Transportation", pattern: /\b(transportation|mobility|vehicles?|transit|automotive|traffic|commuting|railway)\b/i, art: "art-web" },
-    { name: "Productivity & work", pattern: /\b(productivity|workflow|workplace|business process|entrepreneurship)\b/i, art: "art-web" }
+    { name: "Cybersecurity", pattern: /\b(cybersecurity|cyber security|information security|data protection|privacy|fraud prevention)\b/i, art: "art-security" },
+    { name: "Education", pattern: /\b(education|educational|learning|edtech|classroom|curriculum|literacy|teaching)\b/i, art: "art-education" },
+    { name: "Fintech", pattern: /\b(fintech|finance|financial|payments|banking|insurance)\b/i, art: "art-fintech" },
+    { name: "Robotics & hardware", pattern: /\b(robotics|robot|hardware|embedded systems|iot|internet of things|sensors?|wearables?|connected devices?)\b/i, art: "art-hardware" },
+    { name: "Apps & software", pattern: /\b(app development|application development|mobile apps?|software development|web development|app challenge)\b/i, art: "art-software" },
+    { name: "Science & research", pattern: /\b(science|scientific|research|laboratory|laboratories|clinical research)\b/i, art: "art-science" },
+    { name: "Transportation", pattern: /\b(transportation|mobility|vehicles?|transit|automotive|traffic|commuting|railway)\b/i, art: "art-transport" },
+    { name: "Productivity & work", pattern: /\b(productivity|workflow|workplace|business process|entrepreneurship)\b/i, art: "art-work" }
   ];
   const category = categoryRules.filter(({ pattern }) => pattern.test(categorySource)).map(({ name }) => name);
   const date = row.event_start ? String(row.event_start).slice(0, 10) : null;
@@ -91,17 +95,18 @@ function mapHackathon(row) {
   const officialWebsite = row.official_website || "";
   const registrationLink = row.registration_link || "";
   return {
-    id: row.id,
+    id: String(row.id),
     title: row.event_name,
     organizer: row.organizer || "Organizer not listed",
     topic: tracks.split(/[,;\n]/).map((part) => part.trim()).find(Boolean) || "Hackathon",
     category,
     date,
+    endDate: dateOnly(row.event_end) || date,
     location,
     format,
     cost,
     mark: (category[0] || "H").slice(0, 3).toUpperCase(),
-    art: categoryRules.find(({ pattern }) => pattern.test(categorySource))?.art || "art-web",
+    art: categoryRules.find(({ pattern }) => pattern.test(categorySource))?.art || "art-general",
     label: row.status || "Hackathon listing",
     beginner: /\b(beginner|first[- ]time|new to hackathons)\b/i.test(`${tracks} ${row.application_requirements || ""}`),
     student,
@@ -189,6 +194,7 @@ function eligibilityMatches(event) {
 function getFilteredEvents() {
   const keyword = $("#keyword-input").value.trim().toLowerCase();
   const location = $("#location-input").value.trim().toLowerCase();
+  const selectedDate = $("#date-input").value;
   const format = $("#format-filter").value;
   const cost = $("#cost-filter").value;
   const withinDays = Number($("#when-filter").value);
@@ -205,8 +211,9 @@ function getFilteredEvents() {
     const locationMatches = !location || event.location.toLowerCase().includes(location) ||
       (["online", "virtual", "remote"].some((word) => location.includes(word)) && event.format === "Virtual");
     return (includeClosed || event.status !== "Closed/Expired") &&
-      haystack.includes(keyword) && locationMatches && categoryMatches &&
+      keyword.split(/\s+/).every((term) => haystack.includes(term)) && locationMatches && categoryMatches &&
       (!format || event.format === format) && (!cost || event.cost === cost) &&
+      (!selectedDate || (event.date && event.date <= selectedDate && event.endDate >= selectedDate)) &&
       (!withinDays || (daysUntil >= 0 && daysUntil <= withinDays)) && (!savedOnly || saved.has(event.id)) &&
       eligibilityMatches(event);
   });
@@ -218,30 +225,39 @@ function getFilteredEvents() {
   });
   return result;
 }
-function renderEvents() {
+function renderEvents({ keepPage = false } = {}) {
+  if (!keepPage) currentPage = 1;
   const filtered = getFilteredEvents();
   const grid = $("#event-grid");
-  const shown = filtered.slice(0, visibleCount);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  currentPage = Math.min(currentPage, pageCount);
+  const start = (currentPage - 1) * pageSize;
+  const shown = filtered.slice(start, start + pageSize);
   grid.innerHTML = shown.map((event) => `
-    <article class="event-card">
+    <article class="event-card ${event.art}">
       <div class="card-art ${event.art}">
-        <span class="art-stamp">${escapeHtml(event.mark)}</span><span class="art-label">${escapeHtml(event.label)}</span>
+        <span class="event-illustration" aria-hidden="true"></span><span class="art-label">${escapeHtml(event.label)}</span>
         <button class="save-button ${saved.has(event.id) ? "saved" : ""}" data-save="${event.id}" aria-label="${saved.has(event.id) ? "Remove saved event" : "Save event"}">${saved.has(event.id) ? "♥" : "♡"}</button>
       </div>
       <div class="card-body">
-        <div class="card-tags"><span class="event-topic">${escapeHtml(event.topic)}</span><span class="sample-tag">${escapeHtml(event.status || "Listing")}</span></div>
+        <div class="card-tags"><span class="event-topic">${escapeHtml(event.category[0] || event.topic)}</span><span class="sample-tag">${escapeHtml(event.status || "Listing")}</span></div>
         <h4 class="card-title">${escapeHtml(event.title)}</h4><div class="card-organizer">${escapeHtml(event.organizer)}</div><div class="eligibility-quick">${event.student === "required" ? "Student status required" : event.student === "not-required" ? "Student status not required" : "Student status: needs confirmation"}</div>
         <div class="card-meta"><span class="meta-item"><span>▦</span>${event.date ? formatDate(event.date, { month: "short", day: "numeric" }) : "Date TBD"}</span><span class="meta-item"><span>⌖</span>${escapeHtml(event.location)}</span></div>
-        <div class="card-bottom"><span class="format-badge">${escapeHtml(event.format)} · ${escapeHtml(event.cost)}</span><button class="card-detail" data-details="${event.id}">Event details <span>→</span></button></div>
+        <div class="card-bottom"><span class="format-badge">${escapeHtml(event.format)} · ${escapeHtml(event.cost)}</span><button class="card-detail" data-details="${event.id}" aria-label="View details for ${escapeHtml(event.title)}" aria-haspopup="dialog" aria-controls="event-modal">Event details <span>→</span></button></div>
       </div>
     </article>`).join("");
   $("#no-results").hidden = listingsLoading || listingsError || filtered.length > 0;
   grid.hidden = listingsLoading || listingsError || filtered.length === 0;
-  $("#load-more").hidden = listingsLoading || listingsError || filtered.length <= visibleCount;
+  $("#pagination").hidden = listingsLoading || listingsError || filtered.length === 0;
+  $("#previous-page").disabled = currentPage === 1;
+  $("#next-page").disabled = currentPage === pageCount;
+  $("#page-select").innerHTML = Array.from({ length: pageCount }, (_, index) =>
+    `<option value="${index + 1}" ${index + 1 === currentPage ? "selected" : ""}>${index + 1}</option>`).join("");
+  $("#page-status").textContent = `of ${pageCount} · ${start + 1}–${Math.min(start + pageSize, filtered.length)} of ${filtered.length} events`;
   $("#results-title").innerHTML = `${savedOnly ? "Saved events" : "Hackathon listings"} <span id="result-count">(${filtered.length})</span>`;
   $("#results-description").textContent = savedOnly
     ? "Your saved events, all in one place."
-    : "Browse current listings; include closed events to see archived opportunities.";
+    : "Search all listings, including closed events. Uncheck Include closed to hide archived opportunities.";
   const closedCount = events.filter((event) => event.status === "Closed/Expired").length;
   $("#closed-count").textContent = closedCount ? `(${closedCount})` : "";
   const filterIds = ["format-filter", "when-filter", "cost-filter", "student-filter", "undergrad-filter", "outside-school-filter", "international-filter", "age-filter", "my-age-filter", "geography-filter", "invitation-filter", "team-size-filter", "participation-filter", "team-formation-filter", "members-register-filter"];
@@ -254,7 +270,7 @@ function renderEvents() {
 function toggleSaved(id) {
   if (saved.has(id)) saved.delete(id);
   else saved.add(id);
-  renderEvents();
+  renderEvents({ keepPage: true });
 }
 function showEventDetails(id) {
   const event = events.find((item) => item.id === id);
@@ -263,8 +279,8 @@ function showEventDetails(id) {
   const officialUrl = safeExternalUrl(event.officialWebsite);
   const rulesUrl = safeExternalUrl(event.rulesFaqUrl);
   $("#modal-content").innerHTML = `
-    <div class="modal-art ${event.art}"><span class="art-stamp">${escapeHtml(event.mark)}</span><span class="art-label">${escapeHtml(event.label)}</span></div>
-    <div class="card-tags"><span class="event-topic">${escapeHtml(event.topic)}</span><span class="sample-tag">${escapeHtml(event.status || "Listing")}</span></div>
+    <div class="modal-art ${event.art}"><span class="event-illustration" aria-hidden="true"></span><span class="art-label">${escapeHtml(event.label)}</span></div>
+    <div class="card-tags"><span class="event-topic">${escapeHtml(event.category[0] || event.topic)}</span><span class="sample-tag">${escapeHtml(event.status || "Listing")}</span></div>
     <h2 class="modal-title" id="modal-title">${escapeHtml(event.title)}</h2><p class="modal-organizer">${escapeHtml(event.organizer)}</p>
     <div class="modal-facts"><div class="modal-fact"><small>Event date</small><strong>${event.date ? formatDate(event.date, { month: "long", day: "numeric", year: "numeric" }) : "Date not confirmed"}</strong></div><div class="modal-fact"><small>Location</small><strong>${escapeHtml(event.location)}</strong></div><div class="modal-fact"><small>Format</small><strong>${escapeHtml(event.format)}</strong></div><div class="modal-fact"><small>Registration cost</small><strong>${escapeHtml(event.cost)}</strong></div><div class="modal-fact"><small>Confidence</small><strong>${escapeHtml(event.confidence || "Not provided")}</strong></div></div>
     <p class="modal-description">${escapeHtml(event.description)}</p>
@@ -285,13 +301,45 @@ function closeModal() {
   $("#event-modal").classList.remove("open");
   $("#event-modal").setAttribute("aria-hidden", "true");
 }
+function closeSearchSuggestions() {
+  $("#search-suggestions").hidden = true;
+  $("#keyword-input").setAttribute("aria-expanded", "false");
+  $("#keyword-input").removeAttribute("aria-activedescendant");
+  activeSuggestion = -1;
+}
+function updateSearchSuggestions() {
+  const query = $("#keyword-input").value.trim().toLowerCase();
+  if (!query) {
+    closeSearchSuggestions();
+    return;
+  }
+  const terms = query.split(/\s+/);
+  matchingSuggestions = searchSuggestions.filter((value) =>
+    terms.every((term) => value.toLowerCase().includes(term))).slice(0, 8);
+  activeSuggestion = -1;
+  $("#keyword-input").removeAttribute("aria-activedescendant");
+  $("#search-suggestions").innerHTML = matchingSuggestions.length
+    ? matchingSuggestions.map((value, index) =>
+      `<li id="search-option-${index}" role="option" aria-selected="false" data-suggestion="${index}">${escapeHtml(value)}</li>`).join("")
+    : '<li role="presentation" class="suggestion-empty">No suggestions. Try another keyword.</li>';
+  $("#search-suggestions").hidden = false;
+  $("#keyword-input").setAttribute("aria-expanded", "true");
+}
+function selectSearchSuggestion(index) {
+  $("#keyword-input").value = matchingSuggestions[index];
+  savedOnly = false;
+  closeSearchSuggestions();
+  renderEvents();
+}
 function clearFilters() {
   $("#keyword-input").value = "";
   $("#location-input").value = "";
+  $("#date-input").value = "";
+  closeSearchSuggestions();
   $("#format-filter").value = "";
   $("#when-filter").value = "";
   $("#cost-filter").value = "";
-  $("#include-closed").checked = false;
+  $("#include-closed").checked = true;
   ["student-filter", "undergrad-filter", "outside-school-filter", "international-filter", "age-filter", "my-age-filter", "geography-filter", "invitation-filter", "team-size-filter", "participation-filter", "team-formation-filter", "members-register-filter"].forEach((id) => { $(`#${id}`).value = ""; });
   activeCategory = "All";
   savedOnly = false;
@@ -305,13 +353,16 @@ async function loadHackathons() {
     const rows = await response.json();
     if (!Array.isArray(rows)) throw new Error("Listings API response was not a list");
     events = rows.map(mapHackathon);
+    searchSuggestions = [...new Set(events.flatMap((event) =>
+      [event.title, event.organizer, event.location, ...event.category]))].filter(Boolean).sort((a, b) => a.localeCompare(b));
+    if (document.activeElement === $("#keyword-input")) updateSearchSuggestions();
     listingsLoading = false;
     $("#listing-notice").textContent = `Showing ${events.length} live listings from the team database. Confirm event details with organizers.`;
   } catch (error) {
     console.error("Could not load hackathon listings:", error);
     listingsLoading = false;
     listingsError = true;
-    $("#listing-notice").textContent = "Could not connect to the listings database. Start the API and check its PostgreSQL connection settings.";
+    $("#listing-notice").textContent = "Could not load live hackathon listings. Check the HackScout API, its server-side Supabase key, and that hackathon_research is exposed in Supabase API settings.";
   }
   renderEvents();
 }
@@ -320,25 +371,61 @@ function setTopic(topic) {
   const knownCategory = [...$$(".category-chip")].some((chip) => chip.dataset.category.toLowerCase() === topic.toLowerCase());
   activeCategory = knownCategory ? [...$$(".category-chip")].find((chip) => chip.dataset.category.toLowerCase() === topic.toLowerCase()).dataset.category : "All";
   $("#keyword-input").value = knownCategory ? "" : topic;
+  closeSearchSuggestions();
   $$(".category-chip").forEach((chip) => chip.classList.toggle("active", chip.dataset.category === activeCategory));
-  visibleCount = 6;
+  currentPage = 1;
   renderEvents();
   $("#events").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 $("#search-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  closeSearchSuggestions();
   savedOnly = false;
-  visibleCount = 6;
+  currentPage = 1;
   renderEvents();
   $("#events").scrollIntoView({ behavior: "smooth", block: "start" });
 });
-$("#keyword-input").addEventListener("input", () => { savedOnly = false; visibleCount = 6; renderEvents(); });
-$("#location-input").addEventListener("input", () => { savedOnly = false; visibleCount = 6; renderEvents(); });
+$("#keyword-input").addEventListener("input", () => {
+  savedOnly = false;
+  updateSearchSuggestions();
+  renderEvents();
+});
+$("#keyword-input").addEventListener("focus", updateSearchSuggestions);
+$("#keyword-input").addEventListener("blur", closeSearchSuggestions);
+$("#keyword-input").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeSearchSuggestions();
+    return;
+  }
+  if (event.key === "Enter" && !$("#search-suggestions").hidden && activeSuggestion >= 0) {
+    event.preventDefault();
+    selectSearchSuggestion(activeSuggestion);
+    return;
+  }
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  event.preventDefault();
+  if ($("#search-suggestions").hidden) updateSearchSuggestions();
+  if (!matchingSuggestions.length || $("#search-suggestions").hidden) return;
+  activeSuggestion = event.key === "ArrowDown"
+    ? (activeSuggestion + 1) % matchingSuggestions.length
+    : (activeSuggestion <= 0 ? matchingSuggestions.length : activeSuggestion) - 1;
+  $$("#search-suggestions [role='option']").forEach((option, index) =>
+    option.setAttribute("aria-selected", String(index === activeSuggestion)));
+  const option = $(`#search-option-${activeSuggestion}`);
+  $("#keyword-input").setAttribute("aria-activedescendant", option.id);
+  option.scrollIntoView({ block: "nearest" });
+});
+$("#search-suggestions").addEventListener("mousedown", (event) => event.preventDefault());
+$("#search-suggestions").addEventListener("click", (event) => {
+  const option = event.target.closest("[data-suggestion]");
+  if (option) selectSearchSuggestion(Number(option.dataset.suggestion));
+});
+$("#date-input").addEventListener("change", () => { savedOnly = false; renderEvents(); });
+$("#location-input").addEventListener("input", () => { savedOnly = false; renderEvents(); });
 $("#online-toggle").addEventListener("click", () => { $("#location-input").value = "Online"; savedOnly = false; renderEvents(); });
 $("#sort-select").addEventListener("change", renderEvents);
 $("#include-closed").addEventListener("change", () => {
-  visibleCount = 6;
   renderEvents();
 });
 ["format-filter", "when-filter", "cost-filter", "student-filter", "undergrad-filter", "outside-school-filter", "international-filter", "age-filter", "my-age-filter", "geography-filter", "invitation-filter", "team-size-filter", "participation-filter", "team-formation-filter", "members-register-filter"].forEach((id) => {
@@ -351,11 +438,18 @@ $("#filters-toggle").addEventListener("click", () => {
 });
 $("#clear-filters").addEventListener("click", clearFilters);
 $("#reset-search").addEventListener("click", clearFilters);
-$("#load-more").addEventListener("click", () => { visibleCount = getFilteredEvents().length; renderEvents(); });
+function goToPage(page) {
+  currentPage = page;
+  renderEvents({ keepPage: true });
+  $("#events").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+$("#previous-page").addEventListener("click", () => goToPage(currentPage - 1));
+$("#next-page").addEventListener("click", () => goToPage(currentPage + 1));
+$("#page-select").addEventListener("change", (event) => goToPage(Number(event.target.value)));
 $$(".category-chip").forEach((button) => button.addEventListener("click", () => {
   activeCategory = button.dataset.category;
   savedOnly = false;
-  visibleCount = 6;
+  currentPage = 1;
   $$(".category-chip").forEach((chip) => chip.classList.toggle("active", chip === button));
   renderEvents();
 }));
