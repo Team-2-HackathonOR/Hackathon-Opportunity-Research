@@ -1,13 +1,17 @@
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 
 import { db } from "../db/client.js";
 import { toApiRecord, toEventInsert, toEventUpdate } from "../db/mappers.js";
 import {
   applyNowQueue,
+  applicationRequirements,
   codyzaShortlist,
   deadlinesNext30Days,
   deadlinesNext7Days,
+  eventBenefits,
+  eventSources,
+  eventTracks,
   events,
   prepareBeforeOpeningQueue,
   sourceEvidenceAppendix,
@@ -175,6 +179,37 @@ export const hackathonRoutes: FastifyPluginAsync = async (app) => {
         .orderBy(sql`${events.registrationDeadlineAt} asc nulls last`, asc(events.eventName))
         .limit(query.limit);
       const data = rows.map(toApiRecord);
+      if (query.include === "details" && rows.length > 0) {
+        const eventIds = rows.map(({ eventId }) => eventId);
+        const [tracks, benefits, sources, requirements] = await Promise.all([
+          db.select().from(eventTracks).where(inArray(eventTracks.eventId, eventIds)),
+          db.select().from(eventBenefits).where(inArray(eventBenefits.eventId, eventIds)),
+          db.select().from(eventSources).where(inArray(eventSources.eventId, eventIds)),
+          db.select().from(applicationRequirements).where(inArray(applicationRequirements.eventId, eventIds)),
+        ]);
+        const groupByEventId = <T extends { eventId: number }>(items: T[]) => {
+          const grouped = new Map<number, T[]>();
+          for (const item of items) {
+            const group = grouped.get(item.eventId) ?? [];
+            group.push(item);
+            grouped.set(item.eventId, group);
+          }
+          return grouped;
+        };
+        const tracksByEvent = groupByEventId(tracks);
+        const benefitsByEvent = groupByEventId(benefits);
+        const sourcesByEvent = groupByEventId(sources);
+        const requirementsByEvent = groupByEventId(requirements);
+        for (let index = 0; index < rows.length; index += 1) {
+          const eventId = rows[index]!.eventId;
+          Object.assign(data[index]!, {
+            tracks: (tracksByEvent.get(eventId) ?? []).map(toApiRecord),
+            benefits: (benefitsByEvent.get(eventId) ?? []).map(toApiRecord),
+            sources: (sourcesByEvent.get(eventId) ?? []).map(toApiRecord),
+            requirements: (requirementsByEvent.get(eventId) ?? []).map(toApiRecord),
+          });
+        }
+      }
       return { data, count: data.length };
     } catch (error) {
       return replyForDatabaseError(request, reply, error, "Failed to list hackathons.");

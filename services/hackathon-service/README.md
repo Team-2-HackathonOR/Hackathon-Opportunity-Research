@@ -19,6 +19,11 @@ Domain microservice for Codyza hackathon research records.
 
 Clients should call the **gateway** on port 4000. Direct calls to this service need `X-Gateway-Caller: team-2-gateway` and `X-Gateway-Secret`. Health routes stay open.
 
+`GET /api/hackathons` supports `include=details` to include each event's
+tracks, benefits, sources, and application requirements. The public
+`/api/hackscout/hackathons` gateway route uses this option for HackScout;
+other Hackathon Service API routes retain their normal gateway authentication.
+
 ## Scripts
 
 | Command | Purpose |

@@ -18,13 +18,14 @@ afterEach(async () => {
 });
 
 async function startBackend() {
-  const seen: { path: string; secret: string | string[] | undefined; role: string | string[] | undefined; body: string }[] = [];
+  const seen: { path: string; secret: string | string[] | undefined; id: string | string[] | undefined; role: string | string[] | undefined; body: string }[] = [];
   backend = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
     request.on("end", () => {
       seen.push({
         path: request.url ?? "", secret: request.headers["x-gateway-secret"],
+        id: request.headers["x-user-id"],
         role: request.headers["x-user-role"], body,
       });
       response.setHeader("content-type", "application/json");
@@ -39,15 +40,20 @@ async function startBackend() {
 describe("gateway-only HackScout routing", () => {
   it("routes guest reads and suggestions through the limiter and replaces spoofed identity", async () => {
     const { seen, base } = await startBackend();
-    app = await createGatewayApp({ HACKSCOUT_SERVICE_URL: base });
+    app = await createGatewayApp({ HACKATHON_SERVICE_URL: base, HACKSCOUT_SERVICE_URL: base });
     const listings = await app.inject({
-      method: "GET", url: "/api/hackscout/hackathons?topic=AI",
-      headers: { "x-user-role": "admin", "x-gateway-secret": "spoofed" },
+      method: "GET", url: "/api/hackscout/hackathons?limit=100&include=details",
+      headers: { "x-user-id": "spoofed", "x-user-role": "admin", "x-gateway-secret": "spoofed" },
     });
     expect(listings.statusCode).toBe(200);
     expect(seen[0]).toMatchObject({
-      path: "/api/hackathons?topic=AI", secret: TEST_GATEWAY_SECRET, role: undefined,
+      path: "/api/hackathons?limit=100&include=details",
+      secret: TEST_GATEWAY_SECRET, id: "hackscout-guest", role: "viewer",
     });
+    expect((await app.inject({
+      method: "GET", url: "/api/hackscout/hackathons/views/shortlist",
+    })).statusCode).toBe(401);
+    expect(seen).toHaveLength(1);
     expect((await app.inject({
       method: "POST", url: "/api/hackscout/suggestions", payload: { event: "Example" },
     })).statusCode).toBe(200);
@@ -56,7 +62,7 @@ describe("gateway-only HackScout routing", () => {
 
   it("rate limits guest requests before forwarding them", async () => {
     const { seen, base } = await startBackend();
-    app = await createGatewayApp({ HACKSCOUT_SERVICE_URL: base, RATE_LIMIT_MAX: "2" });
+    app = await createGatewayApp({ HACKATHON_SERVICE_URL: base, RATE_LIMIT_MAX: "2" });
     await app.ready();
     for (let i = 0; i < 2; i += 1) {
       expect((await app.inject({ method: "GET", url: "/api/hackscout/hackathons" })).statusCode).toBe(200);

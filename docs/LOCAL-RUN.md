@@ -56,14 +56,18 @@ JWT_SERVICE_URL=http://127.0.0.1:4004
 GATEWAY_INTERNAL_SECRET=local-dev-gateway-secret
 ```
 
-The standalone HackScout API reads from Supabase GraphQL. Copy
-`hackscout-gateway/.env.example` to `hackscout-gateway/.env`, set
-`SUPABASE_GRAPHQL_URL` and `SUPABASE_API_KEY` to a server-side Supabase
-secret/service-role key, and leave `PORT=3002`. Never use or expose a
-publishable key or commit the secret. In Supabase API settings, add
-`hackathon_research` to the exposed schemas, then apply the
-`20261106090000_hackathon_graphql_access.sql` migration to grant the API role
-read access to the listing tables.
+HackScout's public listings come from the Hackathon Service through the main
+gateway. Configure `services/hackathon-service/.env` with its PostgreSQL
+`DATABASE_URL` and the same `GATEWAY_INTERNAL_SECRET` used by `gateway/.env`;
+the gateway's `HACKATHON_SERVICE_URL` defaults to
+`http://127.0.0.1:4001`.
+
+The standalone HackScout API still uses Supabase for suggestions and
+moderation. Copy `hackscout-gateway/.env.example` to
+`hackscout-gateway/.env`, set `SUPABASE_GRAPHQL_URL` and `SUPABASE_API_KEY`
+to a server-side Supabase secret/service-role key, and leave `PORT=3002`.
+Never use or expose a publishable key or commit the secret. These credentials
+are not used to load the public listings.
 
 ## 5. Install dependencies (once)
 
@@ -144,8 +148,9 @@ On the research Supabase project, apply these migrations in order:
 
 The last migration creates or upgrades `public.event_suggestions`, preserving
 existing submissions. Keep `public` exposed to the Supabase REST API and
-`hackathon_research` exposed for listing queries. The service-role key remains
-only on the standalone API server. Browser requests use the existing JWT;
+`hackathon_research` exposed only if using the standalone GraphQL listing
+queries. The service-role key remains only on the standalone API server.
+Browser requests use the existing JWT;
 the API checks its current admin role for every moderation operation.
 
 The queue supports status filters, event-name/website search, and 12 submissions

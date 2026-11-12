@@ -87,6 +87,7 @@ export const eventListQuerySchema = z.object({
   evidence_confidence: evidenceConfidenceSchema.optional(),
   format: eventFormatSchema.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
+  include: z.enum(["details"]).optional(),
 });
 
 export const deadlineQuerySchema = z.object({

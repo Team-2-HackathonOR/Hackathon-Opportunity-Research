@@ -10,6 +10,22 @@ export const hackscoutRoutes: FastifyPluginAsync = async (app) => {
     rewriteRequestHeaders: (request: object, headers: IncomingHttpHeaders) =>
       rewriteUpstreamHeaders(request, headers, env.GATEWAY_INTERNAL_SECRET),
   };
+  const publicListingsReplyOptions = {
+    rewriteRequestHeaders: (request: object, headers: IncomingHttpHeaders) => {
+      const rewritten = rewriteUpstreamHeaders(request, headers, env.GATEWAY_INTERNAL_SECRET);
+      rewritten["x-user-id"] = rewritten["x-user-id"] ?? "hackscout-guest";
+      rewritten["x-user-role"] = rewritten["x-user-role"] ?? "viewer";
+      rewritten["x-user-email"] = rewritten["x-user-email"] ?? "guest@hackscout.local";
+      return rewritten;
+    },
+  };
+  await app.register(proxy, {
+    upstream: env.HACKATHON_SERVICE_URL,
+    prefix: "/api/hackscout/hackathons",
+    rewritePrefix: "/api/hackathons",
+    httpMethods: ["GET", "HEAD"],
+    replyOptions: publicListingsReplyOptions,
+  });
   await app.register(proxy, {
     upstream: env.HACKSCOUT_SERVICE_URL,
     prefix: "/api/hackscout/admin/login",

@@ -19,7 +19,7 @@ export const gatewayInfoRoutes: FastifyPluginAsync = async (app) => {
       { path: "/api/exports/*", upstream: env.HACKATHON_SERVICE_URL, access: "authenticated" },
       { path: "/api/ai/*", upstream: env.AI_SERVICE_URL ?? "not configured", access: "authenticated" },
       { path: "/api/scraper/*", upstream: env.SCRAPER_SERVICE_URL ?? "not configured", access: "authenticated" },
-      { path: "/api/hackscout/hackathons", upstream: env.HACKSCOUT_SERVICE_URL, access: "public" },
+      { path: "/api/hackscout/hackathons", upstream: env.HACKATHON_SERVICE_URL, access: "public" },
       { path: "POST /api/hackscout/suggestions", upstream: env.HACKSCOUT_SERVICE_URL, access: "public" },
       { path: "/api/hackscout/admin/*", upstream: env.HACKSCOUT_SERVICE_URL, access: "admin (login public)" },
       { path: "/api/etl/*", upstream: env.ETL_SERVICE_URL, access: "admin" },
