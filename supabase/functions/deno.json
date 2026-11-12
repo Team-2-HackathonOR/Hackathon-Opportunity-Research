@@ -1,8 +1,0 @@
-{
-  "nodeModulesDir": "auto",
-  "compilerOptions": { "strict": true },
-  "tasks": {
-    "check": "deno check scraper/index.ts etl/index.ts",
-    "test": "deno test --allow-env --allow-read --allow-sys=osRelease _shared scraper etl"
-  }
-}

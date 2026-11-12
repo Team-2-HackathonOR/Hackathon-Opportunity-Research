@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
 const vm = require("node:vm");
-const { loadBrowserScripts } = require("./browser-script-loader");
 
 function createPage(session, setupRequired) {
   const elements = new Map();
@@ -38,7 +38,7 @@ function createPage(session, setupRequired) {
       throw new Error(`Unexpected test request: ${action}`);
     },
   });
-  loadBrowserScripts(join(__dirname, "..", "..", "admin-ui"), context);
+  vm.runInContext(readFileSync(join(__dirname, "..", "..", "admin-ui", "app.js"), "utf8"), context);
   const submit = () => element("#login-form").listeners.submit({ preventDefault() {} });
   const ready = () => new Promise((resolve) => setImmediate(resolve));
   return { element, calls, submit, ready };

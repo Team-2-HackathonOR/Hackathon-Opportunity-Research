@@ -48,7 +48,6 @@ const envSchema = z.object({
   SCRAPER_SERVICE_URL: z.string().url().optional(),
   HACKSCOUT_SERVICE_URL: z.string().url().default("http://127.0.0.1:3002"),
   ETL_SERVICE_URL: z.string().url().default("http://127.0.0.1:8000"),
-  PIPELINE_SERVICE_URL: z.string().url().optional(),
 
   GATEWAY_INTERNAL_SECRET: optionalSecret(16),
 

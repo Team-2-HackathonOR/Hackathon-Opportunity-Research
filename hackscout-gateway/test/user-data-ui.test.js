@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
 const vm = require("node:vm");
-const { loadBrowserScripts } = require("./browser-script-loader");
 
 function createPage({ listingData = [], savedEntries = [] } = {}) {
   const elements = new Map();
@@ -43,7 +43,9 @@ function createPage({ listingData = [], savedEntries = [] } = {}) {
       throw new Error(`Unexpected test request: ${url}`);
     },
   });
-  loadBrowserScripts(join(__dirname, "..", "..", "hackscout-ui"), context);
+  for (const file of ["app.js", "auth.js"]) {
+    vm.runInContext(readFileSync(join(__dirname, "..", "..", "hackscout-ui", file), "utf8"), context);
+  }
   const submit = (id) => element(id).listeners.submit({ preventDefault() {} });
   const login = async (id = "account-a") => {
     loginUser = { id, email: `${id}@example.test`, role: "viewer" };

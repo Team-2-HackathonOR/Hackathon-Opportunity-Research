@@ -6,10 +6,22 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Event, EventCategory, TeamMember
+from app.models import (
+    ApplicationRequirement,
+    ContributionLog,
+    Event,
+    EventBenefit,
+    EventCategory,
+    EventCategoryAssignment,
+    EventMilestone,
+    EventSource,
+    EventTrack,
+    EventVerification,
+    OrganizerFollowUp,
+    ShortlistEntry,
+    TeamMember,
+)
 from app.schemas import EventCreate
-from app.services.event_details import add_event_details
-from app.services.event_research import add_event_research
 
 
 class EventWriter:
@@ -108,8 +120,156 @@ class EventWriter:
         self.session.add(event)
         self.session.flush()
 
-        add_event_details(self.session, event, payload, self._get_or_create_category)
-        add_event_research(self.session, event, payload)
+        for category_input in payload.categories:
+            category = self._get_or_create_category(category_input.category_name)
+            self.session.add(
+                EventCategoryAssignment(
+                    event_id=event.event_id,
+                    category_id=category.category_id,
+                    is_primary=category_input.is_primary,
+                )
+            )
+
+        self.session.add_all(
+            [
+                EventTrack(
+                    event_id=event.event_id,
+                    track_type=track.track_type,
+                    track_name=track.track_name,
+                    description=track.description,
+                )
+                for track in payload.tracks
+            ]
+        )
+
+        self.session.add_all(
+            [
+                EventBenefit(
+                    event_id=event.event_id,
+                    benefit_type=benefit.benefit_type,
+                    title=benefit.title,
+                    description=benefit.description,
+                    is_guaranteed_to_all=benefit.is_guaranteed_to_all,
+                    award_value=benefit.award_value,
+                )
+                for benefit in payload.benefits
+            ]
+        )
+
+        self.session.add_all(
+            [
+                EventSource(
+                    event_id=event.event_id,
+                    source_type=source.source_type,
+                    source_url=source.source_url,
+                    source_title=source.source_title,
+                    is_primary_source=source.is_primary_source,
+                    captured_on=source.captured_on,
+                    verified_on=source.verified_on or datetime.now(UTC),
+                    notes=source.notes,
+                )
+                for source in payload.sources
+            ]
+        )
+
+        self.session.add_all(
+            [
+                EventMilestone(
+                    event_id=event.event_id,
+                    milestone_type=milestone.milestone_type,
+                    milestone_name=milestone.milestone_name,
+                    due_at=milestone.due_at,
+                    timezone_name=milestone.timezone_name,
+                    is_confirmed=milestone.is_confirmed,
+                    notes=milestone.notes,
+                    last_verified_at=milestone.last_verified_at or datetime.now(UTC),
+                )
+                for milestone in payload.milestones
+            ]
+        )
+
+        if payload.shortlist_entry is not None:
+            shortlist = payload.shortlist_entry
+            self.session.add(
+                ShortlistEntry(
+                    event_id=event.event_id,
+                    shortlisted_at=shortlist.shortlisted_at or datetime.now(UTC),
+                    shortlisted_by_member_id=shortlist.shortlisted_by_member_id,
+                    queue_type=shortlist.queue_type,
+                    confirmed_eligibility=shortlist.confirmed_eligibility,
+                    expected_cost_summary=shortlist.expected_cost_summary,
+                    schedule_feasibility=shortlist.schedule_feasibility,
+                    technical_relevance=shortlist.technical_relevance,
+                    organizer_credibility=shortlist.organizer_credibility,
+                    learning_networking_potential=shortlist.learning_networking_potential,
+                    evidence_quality_notes=shortlist.evidence_quality_notes,
+                    why_practical=shortlist.why_practical,
+                    still_needs_verification=shortlist.still_needs_verification,
+                )
+            )
+
+        self.session.add_all(
+            [
+                ApplicationRequirement(
+                    event_id=event.event_id,
+                    queue_type=item.queue_type,
+                    requirement_type=item.requirement_type,
+                    requirement_text=item.requirement_text,
+                    due_at=item.due_at,
+                    status=item.status,
+                    owner_member_id=item.owner_member_id,
+                    notes=item.notes,
+                )
+                for item in payload.application_requirement_items
+            ]
+        )
+
+        self.session.add_all(
+            [
+                OrganizerFollowUp(
+                    event_id=event.event_id,
+                    question_text=item.question_text,
+                    contact_channel=item.contact_channel,
+                    contact_target=item.contact_target,
+                    sent_at=item.sent_at,
+                    assigned_member_id=item.assigned_member_id,
+                    response_status=item.response_status,
+                    confirmed_answer=item.confirmed_answer,
+                    answered_at=item.answered_at,
+                    evidence_source_id=item.evidence_source_id,
+                    notes=item.notes,
+                )
+                for item in payload.organizer_follow_ups
+            ]
+        )
+
+        self.session.add_all(
+            [
+                EventVerification(
+                    event_id=event.event_id,
+                    checked_by_member_id=item.checked_by_member_id,
+                    checked_at=item.checked_at or datetime.now(UTC),
+                    verification_scope=item.verification_scope,
+                    result=item.result,
+                    notes=item.notes,
+                )
+                for item in payload.verifications
+            ]
+        )
+
+        self.session.add_all(
+            [
+                ContributionLog(
+                    event_id=event.event_id,
+                    member_id=item.member_id,
+                    contribution_type=item.contribution_type,
+                    notes=item.notes,
+                    hours_spent=item.hours_spent,
+                    contributed_at=item.contributed_at or datetime.now(UTC),
+                )
+                for item in payload.contributions
+            ]
+        )
 
         self.session.commit()
         self.session.refresh(event)

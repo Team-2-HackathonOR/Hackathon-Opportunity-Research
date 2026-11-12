@@ -4,7 +4,6 @@ import type { FastifyPluginAsync } from "fastify";
 
 import { env } from "../config/env.js";
 import { rewriteUpstreamHeaders } from "../lib/upstream-headers.js";
-import { serviceTarget } from "../lib/service-target.js";
 
 export const hackscoutRoutes: FastifyPluginAsync = async (app) => {
   const replyOptions = {
@@ -20,20 +19,6 @@ export const hackscoutRoutes: FastifyPluginAsync = async (app) => {
       return rewritten;
     },
   };
-  if (env.PIPELINE_SERVICE_URL) {
-    await app.register(proxy, {
-      ...serviceTarget(env.PIPELINE_SERVICE_URL, "/pipeline"),
-      prefix: "/api/hackscout/admin/pipeline",
-      httpMethods: ["GET", "POST"],
-      replyOptions,
-    });
-    await app.register(proxy, {
-      ...serviceTarget(env.PIPELINE_SERVICE_URL),
-      prefix: "/api/internal/pipeline-worker",
-      httpMethods: ["GET", "POST"],
-      replyOptions: { ...replyOptions, timeout: 125000 },
-    });
-  }
   await app.register(proxy, {
     upstream: env.HACKATHON_SERVICE_URL,
     prefix: "/api/internal/hackathons/reset",
@@ -83,19 +68,22 @@ export const hackscoutRoutes: FastifyPluginAsync = async (app) => {
     httpMethods: ["GET", "HEAD"],
   });
   await app.register(proxy, {
-    ...serviceTarget(env.SCRAPER_SERVICE_URL ?? "http://127.0.0.1:3000"),
+    upstream: env.SCRAPER_SERVICE_URL ?? "http://127.0.0.1:3000",
     prefix: "/api/internal/scraper",
+    rewritePrefix: "",
     httpMethods: ["GET", "POST"],
     replyOptions: { ...replyOptions, timeout: 24 * 60 * 60 * 1000 },
   });
   await app.register(proxy, {
-    ...serviceTarget(env.ETL_SERVICE_URL),
+    upstream: env.ETL_SERVICE_URL,
     prefix: "/api/etl",
+    rewritePrefix: "",
     replyOptions: { ...replyOptions, timeout: 24 * 60 * 60 * 1000 },
   });
   await app.register(proxy, {
-    ...serviceTarget(env.ETL_SERVICE_URL),
+    upstream: env.ETL_SERVICE_URL,
     prefix: "/api/internal/etl",
+    rewritePrefix: "",
     httpMethods: ["POST"],
     replyOptions: { ...replyOptions, timeout: 24 * 60 * 60 * 1000 },
   });

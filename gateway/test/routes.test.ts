@@ -41,8 +41,6 @@ describe("gateway routes", () => {
         { path: "POST /api/hackscout/suggestions", upstream: "http://127.0.0.1:4001", access: "public" },
         { path: "/api/hackscout/admin/suggestions", upstream: "http://127.0.0.1:4001", access: "admin" },
         { path: "/api/hackscout/admin/auth/*", upstream: "http://127.0.0.1:4004", access: "admin (access, login and setup public)" },
-        { path: "/api/hackscout/admin/pipeline", upstream: "http://127.0.0.1:3002", access: "admin" },
-        { path: "/api/internal/pipeline-worker/*", upstream: "not configured", access: "internal pipeline" },
         { path: "/api/hackscout/admin/*", upstream: "http://127.0.0.1:3002", access: "admin (login public)" },
         { path: "/api/etl/*", upstream: "http://127.0.0.1:8000", access: "admin" },
         { path: "POST /api/internal/scraper/hackathons/reset", upstream: "http://127.0.0.1:3000", access: "internal pipeline" },

@@ -11,7 +11,7 @@ function createDurablePipelineRuntime() {
     }
     let response;
     try {
-      const target = new URL(`${base.replace(/\/$/, "")}/${route.replace(/^\//, "")}`);
+      const target = new URL(route, base);
       if (target.protocol !== "https:" && process.env.VERCEL === "1") {
         throw new Error("Production worker requires HTTPS.");
       }
