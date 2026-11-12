@@ -1,5 +1,9 @@
 # Durable HackScout pipeline on Vercel
 
+For the gateway-only Supabase replacement (both services, orchestration and
+scheduling), use [the Edge deployment guide](../supabase/functions/README.md).
+Do not run this worker's cron against the same database during an Edge cutover.
+
 The admin backend enqueues a job and returns HTTP 202. Vercel Workflow dispatches
 the work in a separate invocation, so service calls no longer recurse through
 the original admin request:

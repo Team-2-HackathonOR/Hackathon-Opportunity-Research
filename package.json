@@ -3,6 +3,7 @@
   "private": true,
   "description": "Team-2 hackathon research platform (gateway + services)",
   "scripts": {
+    "check:code-size": "node scripts/check-code-size.cjs",
     "dev": "concurrently --kill-others --names hackathon,jwt,scraper,gateway,hackscout,client,admin-ui,mail,etl \"npm run dev:hackathon\" \"npm run dev:jwt\" \"npm run dev:scraper\" \"npm run dev:gateway\" \"npm run dev:hackscout\" \"npm run dev:client\" \"npm run dev:admin-ui\" \"npm run dev:mail\" \"npm run dev:etl\"",
     "dev:hackathon": "npm run dev --prefix services/hackathon-service",
     "dev:jwt": "npm run dev --prefix jwt-service",

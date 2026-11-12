@@ -101,9 +101,21 @@ A failed reset stops the pipeline; later failures can leave databases empty or
 partially filled. The two database resets are not atomic together.
 ETL remains insert-only. Animated stage cards display reset/scraper/ETL elapsed times. Optional weekly,
 every-two-week, or monthly schedules use the pipeline host's `AI_API_KEY`.
-Vercel requires the [durable workflow worker](./pipeline-worker/README.md), its
+The [gateway-only Supabase Edge deployment](./supabase/functions/README.md)
+moves both services, durable orchestration and scheduling to Supabase while
+retaining MongoDB and existing gateway API paths. Configure
+`PIPELINE_SERVICE_URL` on the main gateway to select it.
+Without that Edge routing, Vercel requires the [durable workflow worker](./pipeline-worker/README.md), its
 control-schema migration, and `PIPELINE_WORKER_URL` on the HackScout backend.
 It replaces background memory/timers with queued, bounded steps and durable
 progress/schedules. See [local setup](./docs/LOCAL-RUN.md) for the local runner.
 
 Run the API and PostgreSQL moderation tests with `npm test --prefix .\hackscout-gateway`.
+
+## Contributor code-size rule
+
+Every repository-owned code file, including tests, SQL and workflow YAML, must
+contain at most **200 physical lines**. Split cohesive responsibilities into
+modules; do not minify code to evade the limit. Dependencies, generated artifacts
+and data/lockfiles are not source code. Run `npm run check:code-size`; CI enforces
+the same check for pushes and pull requests.
