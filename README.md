@@ -43,6 +43,15 @@ Hackathon Service and `HACKSCOUT_SERVICE_URL` pointing back to this backend.
 The backend's `/api/admin`, `/api/suggestions`, and legacy listing routes
 remain gateway-only; `/hackscout-admin/` serves the admin UI.
 
+For a separate static admin deployment, set the Vercel project's Root Directory
+to `admin-ui`. Its `vercel.json` forwards `/api/hackscout/admin/*` server-side
+through `https://hackascout-gateway.vercel.app`, including authentication,
+moderation, and pipeline requests. This keeps browser requests and HttpOnly
+session cookies on the admin site's own origin. Update the rewrite destination
+if the HackScout frontend domain changes. Redeploy the admin project after
+adding or changing this configuration; deploying only its static assets without
+the rewrite causes Vercel `NOT_FOUND` responses for admin API requests.
+
 ## Admin moderation
 
 Open `http://localhost:3003` (also available through the public UI's Admin link).

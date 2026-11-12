@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api/hackscout/admin/:path*",
+      "destination": "https://hackascout-gateway.vercel.app/api/hackscout/admin/:path*"
+    }
+  ]
+}
