@@ -28,7 +28,13 @@ const headers = {
 };
 beforeAll(async () => {
   await database.exec("CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;");
-  for (const file of ["20261020180000_hackathon_research.sql", "20261106170000_event_suggestion_moderation.sql"]) {
+  for (const file of [
+    "20261020180000_hackathon_research.sql",
+    "20261020180001_hackathon_research_part_2.sql",
+    "20261020180002_hackathon_research_part_3.sql",
+    "20261020180003_hackathon_research_part_4.sql",
+    "20261106170000_event_suggestion_moderation.sql",
+  ]) {
     await database.exec(await readFile(new URL(`../../../../supabase/migrations/${file}`, import.meta.url), "utf8"));
   }
   vi.mocked(db.transaction).mockImplementation(async (callback) => database.transaction(async (transaction) => {

@@ -9,11 +9,32 @@ This folder contains:
 
 ## Files
 
-- `hackathon_research_schema.sql` - core DDL, enums, tables, indexes, triggers, and reporting views
+- `hackathon_research_schema.sql` - psql entry point for the ordered DDL fragments in `schema/`
 - `requirements.txt` - Python dependencies for the API and ETL pipeline
 - `.env.example` - required environment variables
 - `main.py` - FastAPI application entry point
 - `app/` - ORM models, Pydantic schemas, ETL services, and normalization logic
+
+### Python module organization
+
+Code files, including tests, stay at or below 200 physical lines.
+Existing imports from `app.models`, `app.schemas`, and
+`app.services.normalization` remain supported:
+
+- `model_*.py` share one SQLAlchemy base and separate event, catalog, and research models.
+- `schema_inputs.py` and `schema_event.py` contain nested inputs and the event payload.
+- `event_details.py` and `event_research.py` write child records within the
+  transaction owned by `EventWriter`.
+- `normalization_*.py` separate source mapping, website evidence, prompts,
+  sanitization, and contribution handling.
+
+Run the Python regression tests from this folder:
+
+```bash
+uv run python -m unittest discover -s tests -v
+```
+
+Run `npm run check:code-size` from the repository root to verify the file limit.
 
 ## What the schema covers
 
@@ -81,7 +102,10 @@ driver. Explicit driver selections are preserved.
 
 ## Database initialization
 
-The PostgreSQL DDL lives in [hackathon_research_schema.sql](./hackathon_research_schema.sql). To create the target database from `DATABASE_URL` and apply the schema automatically:
+The PostgreSQL DDL lives in the ordered [schema fragments](./schema), each at most
+200 lines. [hackathon_research_schema.sql](./hackathon_research_schema.sql) includes
+them for psql; `init_db.py` reads and applies the same fragments in one transaction.
+To create the target database from `DATABASE_URL` and apply the schema automatically:
 
 ```bash
 uv run python init_db.py
