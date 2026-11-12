@@ -149,6 +149,26 @@ test("protected admin HTTP workflow", async (t) => {
     () => { throw new Error("Offline"); }, async (request) => {
       assert.equal((await request("suggestions")).status, 502);
     });
+  await scenario("pipeline session verification is a bodyless GET without a JSON content type",
+    (url, options) => {
+      assert.equal(url.pathname, "/api/auth/me");
+      assert.equal(options.method, "GET");
+      assert.equal(options.body, undefined);
+      assert.equal(options.headers["Content-Type"], undefined);
+      return json(adminUser);
+    }, async (request) => {
+      const result = await request("pipeline");
+      assert.equal(result.status, 200);
+      assert.deepEqual(result.body, { job: null });
+    });
+  await scenario("pipeline authentication errors identify the failing upstream status and route",
+    () => new Response("Deployment unavailable", { status: 404 }), async (request) => {
+      const result = await request("pipeline");
+      assert.equal(result.status, 502);
+      assert.match(result.body.error, /HTTP 404 for \/api\/auth\/me/);
+      assert.match(result.body.error, /AUTH_GATEWAY_URL/);
+      assert.doesNotMatch(result.body.error, /Deployment unavailable/);
+    });
   await scenario("admin login uses existing gateway and re-verifies token",
     (url, options) => {
       if (url.pathname === "/api/auth/login") {
