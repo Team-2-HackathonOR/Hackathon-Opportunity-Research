@@ -1,7 +1,9 @@
 let events = [];
 let listingsLoading = true;
 let listingsError = false;
-const saved = new Set(JSON.parse(localStorage.getItem("hackscout-saved") || "[]"));
+const saved = new Set();
+let savedStorageKey = "hackscout-saved:guest";
+let listingsComplete = false;
 let activeCategory = "All";
 let savedOnly = false;
 const pageSize = 6;
@@ -238,12 +240,49 @@ function mapHackathon(row) {
 }
 function updateSavedCount() {
   $("#saved-count").textContent = saved.size;
-  localStorage.setItem("hackscout-saved", JSON.stringify([...saved]));
+}
+function persistSaved() {
+  localStorage.setItem(savedStorageKey, JSON.stringify([...saved]));
+}
+function savedDataError(error) {
+  console.error("Could not update saved hackathons:", error);
+  $("#saved-feedback").textContent = "Could not read or update saved hackathons in this browser. Check browser storage permissions or clear browser data.";
+}
+function pruneSavedHackathons() {
+  if (!listingsComplete) return;
+  const existing = new Set(events.map((event) => event.id));
+  const removed = [...saved].filter((id) => !existing.has(id));
+  if (!removed.length) return;
+  for (const id of removed) saved.delete(id);
+  try { persistSaved(); } catch (error) { savedDataError(error); }
+}
+function setHackScoutSavedAccount(user = null) {
+  savedStorageKey = user ? `hackscout-saved:user:${user.id}` : "hackscout-saved:guest";
+  saved.clear();
+  $("#saved-feedback").textContent = "";
+  try {
+    const stored = JSON.parse(localStorage.getItem(savedStorageKey) || "[]");
+    if (!Array.isArray(stored) || stored.some((id) =>
+      (typeof id !== "string" && typeof id !== "number") || !/^[1-9]\d*$/.test(String(id)))) {
+      throw new Error("Saved hackathons have an invalid format.");
+    }
+    for (const id of stored) saved.add(String(id));
+    pruneSavedHackathons();
+  } catch (error) { savedDataError(error); }
+  savedOnly = false;
+  closeModal();
+  renderEvents();
 }
 function clearHackScoutBrowserData() {
+  const keys = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key === "hackscout-saved" || key === "hackscout-saved:guest" || key?.startsWith("hackscout-saved:user:")) keys.push(key);
+  }
+  for (const key of keys) localStorage.removeItem(key);
   saved.clear();
+  $("#saved-feedback").textContent = "";
   clearFilters();
-  localStorage.removeItem("hackscout-saved");
 }
 function eligibilityMatches(event) {
   const student = $("#student-filter").value;
@@ -355,8 +394,18 @@ function renderEvents({ keepPage = false } = {}) {
   updateSavedCount();
 }
 function toggleSaved(id) {
+  if (!events.some((event) => event.id === id)) return;
+  const wasSaved = saved.has(id);
   if (saved.has(id)) saved.delete(id);
   else saved.add(id);
+  try {
+    persistSaved();
+    $("#saved-feedback").textContent = "";
+  } catch (error) {
+    if (wasSaved) saved.add(id);
+    else saved.delete(id);
+    savedDataError(error);
+  }
   renderEvents({ keepPage: true });
 }
 function showEventDetails(id) {
@@ -434,16 +483,40 @@ function clearFilters() {
   renderEvents();
 }
 async function loadHackathons() {
+  listingsComplete = false;
   try {
-    const response = await fetch("/api/hackscout/hackathons?limit=100&include=details");
-    if (!response.ok) throw new Error(`Listings API returned HTTP ${response.status}`);
-    const payload = await response.json();
-    if (!payload || !Array.isArray(payload.data)) throw new Error("Listings API response was not a list");
-    events = payload.data.map((row) => mapHackathon(mapServiceListing(row)));
+    const rows = [];
+    const seen = new Set();
+    let afterId = 0;
+    while (true) {
+      const response = await fetch(`/api/hackscout/hackathons?limit=100&include=details&after_event_id=${afterId}`);
+      if (!response.ok) throw new Error(`Listings API returned HTTP ${response.status}`);
+      const payload = await response.json();
+      if (!payload || !Array.isArray(payload.data)) throw new Error("Listings API response was not a list");
+      for (const row of payload.data) {
+        const id = String(row.event_id);
+        if (!/^[1-9]\d*$/.test(id) || seen.has(id)) throw new Error("Listings API returned invalid or repeated event IDs");
+        seen.add(id);
+        rows.push(row);
+      }
+      if (!Object.hasOwn(payload, "next_after_id")) {
+        // Older services cannot prove completeness when a page reaches the limit.
+        listingsComplete = payload.data.length < 100;
+        break;
+      }
+      if (payload.next_after_id === null) { listingsComplete = true; break; }
+      if (!Number.isSafeInteger(payload.next_after_id) || payload.next_after_id <= afterId || !payload.data.length) {
+        throw new Error("Listings API pagination did not advance");
+      }
+      afterId = payload.next_after_id;
+    }
+    events = rows.map((row) => mapHackathon(mapServiceListing(row)));
+    pruneSavedHackathons();
     searchSuggestions = [...new Set(events.flatMap((event) =>
       [event.title, event.organizer, event.location, ...event.category]))].filter(Boolean).sort((a, b) => a.localeCompare(b));
     if (document.activeElement === $("#keyword-input")) updateSearchSuggestions();
     listingsLoading = false;
+    listingsError = false;
     $("#listing-notice").textContent = `Showing ${events.length} live listings from the team database. Confirm event details with organizers.`;
   } catch (error) {
     console.error("Could not load hackathon listings:", error);
@@ -631,4 +704,5 @@ $("#suggest-event").addEventListener("click", () => {
 });
 
 renderEvents();
+setHackScoutSavedAccount();
 loadHackathons();

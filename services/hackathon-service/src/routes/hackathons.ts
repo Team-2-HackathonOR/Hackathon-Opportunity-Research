@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 
 import { db } from "../db/client.js";
@@ -170,14 +170,18 @@ export const hackathonRoutes: FastifyPluginAsync = async (app) => {
     if (query.operational_status) conditions.push(eq(events.operationalStatus, query.operational_status));
     if (query.evidence_confidence) conditions.push(eq(events.evidenceConfidence, query.evidence_confidence));
     if (query.format) conditions.push(eq(events.format, query.format));
+    if (query.after_event_id !== undefined) conditions.push(gt(events.eventId, query.after_event_id));
 
     try {
-      const rows = await db
+      const fetched = await db
         .select()
         .from(events)
         .where(conditions.length ? and(...conditions) : undefined)
-        .orderBy(sql`${events.registrationDeadlineAt} asc nulls last`, asc(events.eventName))
-        .limit(query.limit);
+        .orderBy(...(query.after_event_id !== undefined
+          ? [asc(events.eventId)]
+          : [sql`${events.registrationDeadlineAt} asc nulls last`, asc(events.eventName), asc(events.eventId)]))
+        .limit(query.limit + (query.after_event_id !== undefined ? 1 : 0));
+      const rows = fetched.slice(0, query.limit);
       const data = rows.map(toApiRecord);
       if (query.include === "details" && rows.length > 0) {
         const eventIds = rows.map(({ eventId }) => eventId);
@@ -210,7 +214,12 @@ export const hackathonRoutes: FastifyPluginAsync = async (app) => {
           });
         }
       }
-      return { data, count: data.length };
+      return {
+        data, count: data.length,
+        ...(query.after_event_id !== undefined
+          ? { next_after_id: fetched.length > query.limit ? rows.at(-1)!.eventId : null }
+          : {}),
+      };
     } catch (error) {
       return replyForDatabaseError(request, reply, error, "Failed to list hackathons.");
     }

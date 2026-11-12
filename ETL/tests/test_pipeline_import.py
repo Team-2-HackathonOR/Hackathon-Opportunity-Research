@@ -90,6 +90,68 @@ class PipelineImportTests(unittest.TestCase):
     def test_normal_import_keeps_default_limit(self) -> None:
         self.assertEqual(MongoImportRequest().limit, 25)
 
+    def test_cursor_fetch_filters_and_orders_source_ids_for_a_single_run(self) -> None:
+        client = MagicMock()
+        collection = client.__getitem__.return_value.__getitem__.return_value
+        cursor = collection.find.return_value.sort.return_value
+        cursor.limit.return_value.__iter__.return_value = iter([{"id": 8}])
+        with patch("app.services.mongo_source.MongoClient", return_value=client):
+            records = fetch_mongo_records(
+                test_settings, 1, fetched_at="run-timestamp", cursor_mode=True, after_id=7,
+            )
+        self.assertEqual(records, [{"id": 8}])
+        collection.find.assert_called_once_with(
+            {"fetchedAt": "run-timestamp", "id": {"$gt": 7}}, {"_id": 0}
+        )
+        collection.find.return_value.sort.assert_called_once_with("id", 1)
+        cursor.limit.assert_called_once_with(1)
+        client.close.assert_called_once()
+
+    def test_cursor_import_is_bounded_and_returns_the_next_source_id(self) -> None:
+        result = ImportResult(
+            source="mongodb", processed_count=1, inserted_count=1,
+            failed_count=0, successes=[], failures=[],
+        )
+        with (
+            patch.object(main, "settings", test_settings),
+            patch.object(main, "fetch_mongo_records", return_value=[{"id": 8}]) as fetch,
+            patch.object(main, "EtlService") as service,
+        ):
+            service.return_value.import_records.return_value = result
+            payload = MongoImportRequest(limit=1, fetched_at="run-timestamp", cursor_mode=True, after_id=7)
+            imported = main.import_from_mongodb(payload, "run-key-fixture")
+            self.assertEqual(imported.next_after_id, 8)
+            self.assertEqual(fetch.call_args.kwargs["after_id"], 7)
+            self.assertTrue(fetch.call_args.kwargs["cursor_mode"])
+            scoped = service.call_args.args[0]
+            self.assertEqual(scoped.ai_api_key, "run-key-fixture")
+            self.assertLessEqual(scoped.ai_timeout_seconds, 45)
+            self.assertLessEqual(scoped.ai_web_fetch_timeout_seconds, 10)
+            self.assertEqual(test_settings.ai_timeout_seconds, 60)
+
+    def test_cursor_import_rejects_unbounded_or_unscoped_requests(self) -> None:
+        with patch.object(main, "fetch_mongo_records") as fetch:
+            for payload in [
+                MongoImportRequest(cursor_mode=True, limit=1),
+                MongoImportRequest(cursor_mode=True, limit=None, fetched_at="run-timestamp"),
+                MongoImportRequest(cursor_mode=True, limit=2, fetched_at="run-timestamp"),
+                MongoImportRequest(after_id=7),
+            ]:
+                with self.assertRaises(HTTPException) as raised:
+                    main.import_from_mongodb(payload)
+                self.assertEqual(raised.exception.status_code, 400)
+            fetch.assert_not_called()
+
+    def test_cursor_import_rejects_invalid_source_ids_before_writing(self) -> None:
+        with (
+            patch.object(main, "fetch_mongo_records", return_value=[{"id": "invalid"}]),
+            patch.object(main, "EtlService") as service,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                main.import_from_mongodb(MongoImportRequest(limit=1, fetched_at="run-timestamp", cursor_mode=True))
+            self.assertEqual(raised.exception.status_code, 422)
+            service.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

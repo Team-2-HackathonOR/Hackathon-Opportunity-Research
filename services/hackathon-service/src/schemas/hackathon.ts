@@ -87,6 +87,7 @@ export const eventListQuerySchema = z.object({
   evidence_confidence: evidenceConfidenceSchema.optional(),
   format: eventFormatSchema.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
+  after_event_id: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
   include: z.enum(["details"]).optional(),
 });
 

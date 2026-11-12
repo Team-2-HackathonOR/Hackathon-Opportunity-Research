@@ -375,7 +375,7 @@ function showPipelineSchedule(schedule, updateSelection = true) {
   $("#pipeline-schedule-status").classList.toggle("error", !!schedule.lastError);
   $("#pipeline-schedule-status").textContent = schedule.lastError ||
     (next ? `Next run: ${next} (${schedule.timeZone}).` : "Automatic runs are disabled.") +
-    (schedule.keyConfigured ? "" : " Configure AI_API_KEY on the backend to enable a schedule.");
+    (schedule.keyConfigured ? "" : " Configure AI_API_KEY on the pipeline host (the workflow worker on Vercel) to enable a schedule.");
 }
 
 async function loadPipelineSchedule(updateSelection = true) {

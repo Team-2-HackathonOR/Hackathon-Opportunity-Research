@@ -20,6 +20,7 @@ function accountModeSelect(mode) {
 }
 
 function accountShowApplication() {
+  setHackScoutSavedAccount(accountSession?.user ?? null);
   accountElement("account-entrance").hidden = true;
   accountElement("application-shell").hidden = false;
   accountElement("account-menu").textContent = accountSession
@@ -79,7 +80,8 @@ accountElement("account-form").addEventListener("submit", async (event) => {
       body: { email: accountElement("account-email").value.trim(), password },
     });
     if (!session || typeof session.token !== "string" || !session.token ||
-        typeof session.user?.email !== "string" || !["viewer", "researcher", "admin"].includes(session.user.role)) {
+        typeof session.user?.id !== "string" || !session.user.id ||
+        typeof session.user.email !== "string" || !["viewer", "researcher", "admin"].includes(session.user.role)) {
       throw new Error("The authentication service returned an invalid session.");
     }
     accountSession = session;
@@ -105,6 +107,7 @@ accountElement("account-menu").addEventListener("click", async () => {
       accountElement("account-feedback").textContent = `Signed out locally. ${error.message}`;
     } finally {
       accountSession = null;
+      setHackScoutSavedAccount();
       accountSetBusy(false);
     }
   }

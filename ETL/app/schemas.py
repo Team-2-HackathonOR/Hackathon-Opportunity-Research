@@ -229,6 +229,8 @@ class MongoImportRequest(BaseModel):
     collection_name: str | None = None
     limit: int | None = Field(default=25, ge=1, le=1000)
     fetched_at: str | None = Field(default=None, min_length=1, max_length=40)
+    cursor_mode: bool = False
+    after_id: int | None = Field(default=None, ge=0)
     use_ai_normalization: bool = True
     primary_researcher_id: int | None = None
     verifier_id: int | None = None
@@ -254,6 +256,7 @@ class ImportResult(BaseModel):
     failed_count: int
     successes: list[ImportSuccess]
     failures: list[ImportFailure]
+    next_after_id: int | None = None
 
 
 class RawImportRecord(BaseModel):
