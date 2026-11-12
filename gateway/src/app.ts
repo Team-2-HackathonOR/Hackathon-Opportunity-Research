@@ -14,6 +14,7 @@ import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
 import { gatewayInfoRoutes } from "./routes/gateway-info.js";
 import { healthRoutes } from "./routes/health.js";
+import { hackscoutRoutes } from "./routes/hackscout.js";
 import { proxyRoutes } from "./routes/proxy.js";
 import { serviceProxyRoutes } from "./routes/service-proxy.js";
 import "./types/fastify.js";
@@ -57,11 +58,16 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(healthRoutes);
   await app.register(gatewayInfoRoutes);
   await app.register(authRoutes);
+  await app.register(hackscoutRoutes);
   await app.register(adminRoutes);
   await app.register(serviceProxyRoutes);
   await app.register(proxyRoutes);
 
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof Error && "statusCode" in error && error.statusCode === 429) {
+      request.log.warn({ requestId: request.id }, "request rate limit exceeded");
+      return reply.code(429).send({ error: error.message });
+    }
     const zodError =
       error instanceof ZodError
         ? error

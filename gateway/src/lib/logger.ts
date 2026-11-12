@@ -19,6 +19,8 @@ export const logRedact = {
     'req.headers["x-admin-key"]',
     'req.headers["x-api-key"]',
     'req.headers["x-gateway-secret"]',
+    'req.headers["x-ai-api-key"]',
+    "req.body.apiKey",
     "req.body.password",
     "req.body.token",
   ],

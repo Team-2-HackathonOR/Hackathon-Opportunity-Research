@@ -3,10 +3,12 @@ require("dotenv").config();
 const express = require("express");
 const path = require("node:path");
 const { createAdminRouter } = require("./admin");
-const { createAuthRouter, requireSession } = require("./auth");
+const { createAuthRouter } = require("./auth");
+const { requireGateway } = require("./gateway-auth");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+app.use("/api", requireGateway);
 
 const eventsQuery = `
   query HackScoutEvents($after: Cursor) {
@@ -266,7 +268,7 @@ app.get("/api/health", async (_request, response, next) => {
   }
 });
 
-app.get("/api/hackathons", requireSession, async (_request, response, next) => {
+app.get("/api/hackathons", async (_request, response, next) => {
   try {
     response.json(await getEvents());
   } catch (error) {
@@ -274,7 +276,7 @@ app.get("/api/hackathons", requireSession, async (_request, response, next) => {
   }
 });
 
-app.post("/api/suggestions", requireSession, express.json({ limit: "10kb" }), async (request, response, next) => {
+app.post("/api/suggestions", express.json({ limit: "10kb" }), async (request, response, next) => {
   const eventName = typeof request.body?.event === "string" ? request.body.event.trim() : "";
   const website = typeof request.body?.website === "string" ? request.body.website.trim() : "";
   let parsedWebsite;
@@ -320,8 +322,8 @@ app.post("/api/suggestions", requireSession, express.json({ limit: "10kb" }), as
 });
 
 app.use("/api/auth", createAuthRouter());
-app.use("/api/admin", createAdminRouter(getSupabaseConfig));
-app.use("/login", express.static(path.join(__dirname, "..", "login-ui")));
+const adminRouter = createAdminRouter(getSupabaseConfig);
+app.use("/api/admin", adminRouter);
 app.use("/admin", express.static(path.join(__dirname, "..", "admin-ui")));
 app.use(express.static(path.join(__dirname, "..", "hackscout-ui")));
 
@@ -335,6 +337,7 @@ if (require.main === module) {
   const server = app.listen(port, () => {
     console.log(`HackScout is running at http://localhost:${port}`);
   });
+  server.once("close", adminRouter.closeScheduler);
   process.on("SIGINT", () => server.close(() => process.exit(0)));
   process.on("SIGTERM", () => server.close(() => process.exit(0)));
 }

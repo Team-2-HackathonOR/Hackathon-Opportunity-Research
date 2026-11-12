@@ -25,6 +25,7 @@ htmlcov/
 # Runtime logs
 logs/
 *.log
+/hackscout-gateway/.data/
 
 # Local Supabase CLI state
 /supabase/.temp/

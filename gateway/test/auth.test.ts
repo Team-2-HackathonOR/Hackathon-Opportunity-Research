@@ -72,6 +72,24 @@ describe("role policy", () => {
 });
 
 describe("gateway authentication", () => {
+  it("proxies public registration and refuses role escalation fields", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      token: "signed", user: { id: "1", email: "new@example.com", role: "viewer" },
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    app = await createGatewayApp();
+    const payload = { email: "new@example.com", password: "correct-password" };
+    const response = await app.inject({ method: "POST", url: "/api/auth/register", payload });
+    expect(response.statusCode).toBe(201);
+    const call = fetchMock.mock.calls[0] as [URL, { headers: Record<string, string>; body: string }] | undefined;
+    expect(call?.[0].toString()).toBe("http://127.0.0.1:4004/register");
+    expect(call?.[1].headers["x-gateway-secret"]).toBe(TEST_GATEWAY_SECRET);
+    expect(JSON.parse(call?.[1].body ?? "{}")).toEqual(payload);
+    expect((await app.inject({
+      method: "POST", url: "/api/auth/register", payload: { ...payload, role: "admin" },
+    })).statusCode).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it("proxies login without a bearer token and forwards the gateway secret", async () => {
     const fetchMock = vi.fn(
       async () =>

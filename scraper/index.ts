@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { registerHackathonRoutes } from './domains/hackathons/routes';
+import { requireGateway } from './shared/gateway-auth';
 
 // The entrypoint now focuses on app bootstrap while domain modules own the business logic.
 const DEFAULT_PORT = 3000;
@@ -30,6 +31,7 @@ app.get('/health', (_request, response) => {
   });
 });
 
+app.use('/hackathons', requireGateway);
 registerHackathonRoutes(app);
 
 app.listen(port, () => {

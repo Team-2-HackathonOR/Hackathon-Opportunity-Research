@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import fp from "fastify-plugin";
+import { timingSafeEqual } from "node:crypto";
 
 import { env } from "../config/env.js";
 import { roleAllowsMethod } from "../lib/jwt.js";
@@ -12,6 +13,8 @@ const PROXIED_PREFIXES = [
   "/api/exports",
   "/api/ai",
   "/api/scraper",
+  "/api/hackscout",
+  "/api/etl",
 ];
 
 export function normalizePath(url: string): string {
@@ -29,7 +32,13 @@ export function isPublicRoute(method: string, path: string): boolean {
   if (method === "GET" && path === "/gateway/routes") {
     return true;
   }
-  return method === "POST" && (path === "/api/auth/login" || path === "/api/auth/invitations/accept");
+  if ((method === "GET" || method === "HEAD") &&
+      ["/api/hackscout/hackathons", "/api/hackscout/health"].includes(path)) return true;
+  if (method === "POST" &&
+      ["/api/hackscout/suggestions", "/api/hackscout/admin/login"].includes(path)) return true;
+  return method === "POST" && (
+    path === "/api/auth/login" || path === "/api/auth/register" || path === "/api/auth/invitations/accept"
+  );
 }
 
 function isProxiedApi(path: string): boolean {
@@ -66,6 +75,25 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
     }
 
     const path = normalizePath(request.url);
+    if (path === "/api/hackscout" || path.startsWith("/api/hackscout/")) {
+      if (!env.GATEWAY_INTERNAL_SECRET) {
+        return reply.code(503).send({ error: "Gateway secret is not configured." });
+      }
+    }
+    if (path.startsWith("/api/internal/")) {
+      const supplied = request.headers["x-gateway-secret"];
+      const expected = env.GATEWAY_INTERNAL_SECRET;
+      const valid = typeof supplied === "string" && !!expected &&
+        Buffer.byteLength(supplied) === Buffer.byteLength(expected) &&
+        timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+      const allowed = request.method === "GET" && path === "/api/internal/scraper/hackathons/persist-all"
+        || request.method === "POST" && path === "/api/internal/etl/etl/import/mongodb";
+      if (!valid || request.headers["x-gateway-caller"] !== "team-2-gateway" || !allowed) {
+        request.log.warn({ path, requestId: request.id }, "internal pipeline access denied");
+        return reply.code(403).send({ error: "Internal pipeline access is required." });
+      }
+      return;
+    }
     if (isPublicRoute(request.method, path)) {
       return;
     }
@@ -89,6 +117,11 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
     const result = await verifyBearer(request.headers.authorization);
     if (rejectBearer(result, reply) || result.status !== "ok") {
       return;
+    }
+    if ((path === "/api/hackscout/admin" || path.startsWith("/api/hackscout/admin/") ||
+        path === "/api/etl" || path.startsWith("/api/etl/")) &&
+        result.user.role !== "admin") {
+      return reply.code(403).send({ error: "An administrator role is required." });
     }
     if (path === "/api/auth/logout") {
       attachAuthUser(request, result.user);

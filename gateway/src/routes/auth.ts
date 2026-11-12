@@ -16,6 +16,13 @@ const loginBody = z.object({
   password: z.string().min(1),
 });
 
+const registrationBody = z.object({
+  email: z.string().trim().max(254).email(),
+  password: z.string().min(8).refine((value) => Buffer.byteLength(value, "utf8") <= 72, {
+    message: "Password must be at most 72 UTF-8 bytes.",
+  }),
+}).strict();
+
 const invitationBody = z.object({
   email: emailField,
   role: z.enum(ROLES),
@@ -78,6 +85,13 @@ async function forwardToJwtService(
 }
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
+  app.post("/api/auth/register", authRateLimit, async (request, reply) => {
+    const parsed = registrationBody.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "Validation failed.", details: parsed.error.flatten() });
+    }
+    return forwardToJwtService(request, reply, "/register", parsed.data);
+  });
   app.post("/api/auth/login", authRateLimit, async (request, reply) => {
     const parsed = loginBody.safeParse(request.body);
     if (!parsed.success) {

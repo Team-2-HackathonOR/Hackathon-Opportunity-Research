@@ -322,8 +322,9 @@ const requestPaginationModelResponse = async (
   payload: DevpostApiResponse,
   requestedPage: number,
   fallback: PaginationAnalysis,
+  apiKeyOverride?: string,
 ): Promise<PaginationModelResponse> => {
-  const config = getPaginationAnalyzerConfig();
+  const config = getPaginationAnalyzerConfig(apiKeyOverride);
   const aiConfig = config.ai;
 
   if (!aiConfig.enabled) {
@@ -478,15 +479,17 @@ export const collectPaginationSignals = (
 export const analyzePagination = async (
   payload: DevpostApiResponse,
   requestedPage: number,
+  apiKeyOverride?: string,
 ): Promise<PaginationAnalysis> => {
   const fallbackAnalysis = analyzePaginationDeterministically(payload, requestedPage);
   const modelResponse = await requestPaginationModelResponse(
     payload,
     requestedPage,
     fallbackAnalysis,
+    apiKeyOverride,
   );
   const signals = collectPaginationSignals(payload, modelResponse.classifications);
-  const config = getPaginationAnalyzerConfig();
+  const config = getPaginationAnalyzerConfig(apiKeyOverride);
 
   return {
     analysisEngine: config.ai.enabled ? 'ai' : 'deterministic',

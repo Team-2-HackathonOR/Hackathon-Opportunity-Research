@@ -102,7 +102,12 @@ const persistAllHackathons = async (request: Request, response: Response): Promi
     }
 
     const firstPayload = firstPageResponse.payload;
-    const paginationAnalysis = await analyzePagination(firstPayload, requestedStartPage);
+    const aiApiKey = request.get('x-ai-api-key')?.trim();
+    if (aiApiKey && aiApiKey.length > 4096) {
+      response.status(400).json({ error: 'The AI API key is too long.' });
+      return;
+    }
+    const paginationAnalysis = await analyzePagination(firstPayload, requestedStartPage, aiApiKey);
 
     if (paginationAnalysis.totalPages === null) {
       response.status(502).json({

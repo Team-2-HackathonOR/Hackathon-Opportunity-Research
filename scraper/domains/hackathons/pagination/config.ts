@@ -22,8 +22,8 @@ export type PaginationAnalyzerConfig = {
   };
 };
 
-export const getPaginationAnalyzerConfig = (): PaginationAnalyzerConfig => {
-  const apiKey = process.env.AI_API_KEY?.trim() ?? '';
+export const getPaginationAnalyzerConfig = (apiKeyOverride?: string): PaginationAnalyzerConfig => {
+  const apiKey = apiKeyOverride?.trim() || process.env.AI_API_KEY?.trim() || '';
   const timeoutSeconds =
     parsePositiveInteger(process.env.AI_TIMEOUT_SECONDS) ?? DEFAULT_AI_TIMEOUT_SECONDS;
 

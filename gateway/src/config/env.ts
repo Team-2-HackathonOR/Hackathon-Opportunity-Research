@@ -46,6 +46,8 @@ const envSchema = z.object({
   JWT_SERVICE_URL: z.string().url().default("http://127.0.0.1:4004"),
   AI_SERVICE_URL: z.string().url().optional(),
   SCRAPER_SERVICE_URL: z.string().url().optional(),
+  HACKSCOUT_SERVICE_URL: z.string().url().default("http://127.0.0.1:3002"),
+  ETL_SERVICE_URL: z.string().url().default("http://127.0.0.1:8000"),
 
   GATEWAY_INTERNAL_SECRET: optionalSecret(16),
 
