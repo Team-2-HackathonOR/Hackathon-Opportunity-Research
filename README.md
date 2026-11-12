@@ -15,6 +15,13 @@ deletes linked team-member/contribution/verification records, and anonymizes
 moderation identity and notes. Public listings and anonymous suggestions stay.
 Clearing browser data does not delete the account, and deleting the account does
 not clear browser bookmarks.
+Saved listings are device-local and separated by authenticated account ID, with
+a separate guest collection. Legacy unscoped bookmarks are not assigned to an
+account because their owner is unknown. A complete successful listings refresh
+removes bookmarks for deleted events; failed or incomplete refreshes do not.
+The public UI follows the Hackathon Service's `after_event_id` cursor so saves
+beyond the first 100 listings are not incorrectly removed. **Clear browser data**
+removes all HackScout bookmark collections on the device, not unrelated storage.
 
 ## Run locally
 
@@ -81,7 +88,9 @@ Apply [`20261106170000_event_suggestion_moderation.sql`](./supabase/migrations/2
 Search and paginate pending, approved, or rejected submissions. Supply the organizer, official website, format, start date, description, and location for non-virtual events before approving. Approval publishes a listing as **Needs Confirmation** with low evidence confidence; rejection requires a reason and does not publish. Both retain the reviewer, timestamp, and review note. Reviewed submissions are read-only.
 
 The dashboard also runs **reset MongoDB and PostgreSQL → scraper → MongoDB → ETL with AI → PostgreSQL**.
-Enter an OpenAI-compatible key for each run; it is not saved. The UI shows
+Enter an OpenAI-compatible key for each run. Locally it stays in process memory;
+on Vercel it is encrypted temporarily in the worker's control database, never
+stored as plaintext or passed into Workflow history. The UI shows
 stage and import counts, including partial failures. Configure
 `SCRAPER_SERVICE_URL` and `ETL_SERVICE_URL` on the main gateway and use the
 same MongoDB database/collection for both services. Every manual and automatic
@@ -91,8 +100,10 @@ team members are retained; published suggestions are unlinked from deleted event
 A failed reset stops the pipeline; later failures can leave databases empty or
 partially filled. The two database resets are not atomic together.
 ETL remains insert-only. Animated stage cards display reset/scraper/ETL elapsed times. Optional weekly,
-every-two-week, or monthly schedules use the backend's `AI_API_KEY` while it
-is running; form keys are not saved. See [local setup](./docs/LOCAL-RUN.md)
-for schedule timing and persistence.
+every-two-week, or monthly schedules use the pipeline host's `AI_API_KEY`.
+Vercel requires the [durable workflow worker](./pipeline-worker/README.md), its
+control-schema migration, and `PIPELINE_WORKER_URL` on the HackScout backend.
+It replaces background memory/timers with queued, bounded steps and durable
+progress/schedules. See [local setup](./docs/LOCAL-RUN.md) for the local runner.
 
 Run the API and PostgreSQL moderation tests with `npm test --prefix .\hackscout-gateway`.

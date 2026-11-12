@@ -110,7 +110,21 @@ def import_from_mongodb(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="An unlimited import requires a scraper fetched_at timestamp.",
         )
+    if payload.cursor_mode and (not payload.fetched_at or payload.limit != 1):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cursor imports require fetched_at and a one-record limit.",
+        )
+    if payload.after_id is not None and not payload.cursor_mode:
+        raise HTTPException(status_code=400, detail="after_id requires cursor_mode.")
     run_settings = settings.model_copy(update={"ai_api_key": ai_api_key.strip()}) if ai_api_key else settings
+    if payload.cursor_mode:
+        run_settings = run_settings.model_copy(update={
+            "ai_timeout_seconds": min(run_settings.ai_timeout_seconds, 45),
+            "ai_web_fetch_timeout_seconds": min(run_settings.ai_web_fetch_timeout_seconds, 10),
+            "ai_web_fetch_max_urls": min(run_settings.ai_web_fetch_max_urls, 3),
+            "ai_web_fetch_max_discovered_urls": min(run_settings.ai_web_fetch_max_discovered_urls, 2),
+        })
     try:
         records = fetch_mongo_records(
             settings=run_settings,
@@ -118,7 +132,12 @@ def import_from_mongodb(
             database_name=payload.database_name,
             collection_name=payload.collection_name,
             fetched_at=payload.fetched_at,
+            **({"cursor_mode": True, "after_id": payload.after_id} if payload.cursor_mode else {}),
         )
+        if payload.cursor_mode and any(
+            not isinstance(record.get("id"), int) or isinstance(record.get("id"), bool) for record in records
+        ):
+            raise HTTPException(status_code=422, detail="Cursor imports require numeric source IDs.")
         result = EtlService(run_settings).import_records(
             records=records,
             source_name="mongodb",
@@ -126,6 +145,8 @@ def import_from_mongodb(
             primary_researcher_id=payload.primary_researcher_id,
             verifier_id=payload.verifier_id,
         )
+        if payload.cursor_mode and records:
+            result.next_after_id = records[-1]["id"]
         if result.failed_count:
             logging.getLogger(__name__).warning(
                 "MongoDB ETL import had %s failed records out of %s processed.",

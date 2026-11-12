@@ -4,7 +4,7 @@ const { join } = require("node:path");
 const { test } = require("node:test");
 const vm = require("node:vm");
 
-function createPage() {
+function createPage({ listingData = [], savedEntries = [] } = {}) {
   const elements = new Map();
   function element(selector) {
     if (!elements.has(selector)) elements.set(selector, {
@@ -17,9 +17,11 @@ function createPage() {
     });
     return elements.get(selector);
   }
-  const storage = new Map([["hackscout-saved", '["1","2"]'], ["unrelated-setting", "preserve"]]);
+  const storage = new Map([["hackscout-saved", '["1","2"]'], ["unrelated-setting", "preserve"], ...savedEntries]);
   const calls = [];
   let deletionFails = false;
+  let loginUser = { id: "account-a", email: "fixture@example.test", role: "viewer" };
+  let listings = () => Response.json({ data: listingData, next_after_id: null });
   const context = vm.createContext({
     document: {
       querySelector: element, querySelectorAll: () => [], getElementById: (id) => element(`#${id}`),
@@ -29,12 +31,14 @@ function createPage() {
     localStorage: {
       getItem: (key) => storage.get(key) ?? null,
       setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key),
+      get length() { return storage.size; }, key: (index) => [...storage.keys()][index] ?? null,
     },
     URL, setTimeout: () => 1, clearTimeout() {},
     fetch: async (url, options = {}) => {
       calls.push({ url, options });
-      if (url.startsWith("/api/hackscout/hackathons")) return Response.json({ data: [] });
-      if (url.endsWith("/login")) return Response.json({ token: "fixture", user: { email: "fixture@example.test", role: "viewer" } });
+      if (url.startsWith("/api/hackscout/hackathons")) return listings(url);
+      if (url.endsWith("/login")) return Response.json({ token: "fixture", user: loginUser });
+      if (url.endsWith("/logout")) return Response.json({ ok: true });
       if (url.endsWith("/account")) return Response.json(deletionFails ? { error: "Current password is incorrect." } : { deleted: true }, { status: deletionFails ? 403 : 200 });
       throw new Error(`Unexpected test request: ${url}`);
     },
@@ -43,12 +47,17 @@ function createPage() {
     vm.runInContext(readFileSync(join(__dirname, "..", "..", "hackscout-ui", file), "utf8"), context);
   }
   const submit = (id) => element(id).listeners.submit({ preventDefault() {} });
-  const login = async () => {
-    element("#account-email").value = "fixture@example.test";
+  const login = async (id = "account-a") => {
+    loginUser = { id, email: `${id}@example.test`, role: "viewer" };
+    element("#account-email").value = loginUser.email;
     element("#account-password").value = "correct-password";
     await submit("#account-form");
   };
-  return { element, calls, storage, submit, login, failDeletion() { deletionFails = true; } };
+  return {
+    element, calls, storage, submit, login, failDeletion() { deletionFails = true; },
+    run: (source) => vm.runInContext(source, context),
+    setListings(handler) { listings = handler; },
+  };
 }
 test("clearing browser data requires confirmation, preserves unrelated storage and needs no account", async () => {
   const page = createPage();
@@ -93,6 +102,68 @@ test("failed account deletion reports the error and keeps the user signed in", a
   await page.submit("#delete-account-form");
   assert.equal(page.element("#account-data-feedback").textContent, "Current password is incorrect.");
   assert.equal(page.element("#delete-account-form").hidden, false);
-  assert.match(page.element("#account-menu").textContent, /fixture@example.test/);
+  assert.match(page.element("#account-menu").textContent, /account-a@example.test/);
   assert.equal(page.element("#delete-account-password").value, "");
+});
+
+const listing = (id) => ({ event_id: id, event_name: `Hackathon ${id}`, format: "virtual" });
+
+test("saved events are isolated between accounts and guests, including sign-out", async () => {
+  const page = createPage({ listingData: [listing(1), listing(2)], savedEntries: [
+    ["hackscout-saved:guest", '["2"]'],
+  ] });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(page.element("#saved-count").textContent, 1);
+  await page.login();
+  assert.equal(page.element("#saved-count").textContent, 0);
+  page.run('toggleSaved("1")');
+  assert.equal(page.storage.get("hackscout-saved:user:account-a"), '["1"]');
+  await page.element("#account-menu").listeners.click();
+  assert.equal(page.element("#saved-count").textContent, 1);
+  assert.equal(page.run('saved.has("1")'), false);
+  await page.login("account-b");
+  assert.equal(page.element("#saved-count").textContent, 0);
+  page.run('toggleSaved("2")');
+  await page.element("#account-menu").listeners.click();
+  await page.login("account-a");
+  assert.equal(page.run('JSON.stringify([...saved])'), '["1"]');
+  assert.equal(page.storage.get("hackscout-saved:user:account-b"), '["2"]');
+});
+
+test("deleted listings are pruned from the active account and persisted", async () => {
+  const page = createPage({ listingData: [listing(1)], savedEntries: [
+    ["hackscout-saved:user:account-a", '["1","2"]'],
+  ] });
+  await new Promise((resolve) => setImmediate(resolve));
+  await page.login();
+  assert.equal(page.element("#saved-count").textContent, 1);
+  assert.equal(page.storage.get("hackscout-saved:user:account-a"), '["1"]');
+  page.setListings(() => Response.json({ data: [], next_after_id: null }));
+  await page.run("loadHackathons()");
+  assert.equal(page.element("#saved-count").textContent, 0);
+  assert.equal(page.storage.get("hackscout-saved:user:account-a"), "[]");
+});
+
+test("pagination preserves saved events beyond the first page and failed refreshes never prune", async () => {
+  const page = createPage({ savedEntries: [["hackscout-saved:user:account-a", '["101","999"]']] });
+  page.setListings((url) => new URL(url, "https://example.test").searchParams.get("after_event_id") === "0"
+    ? Response.json({ data: Array.from({ length: 100 }, (_, index) => listing(index + 1)), next_after_id: 100 })
+    : Response.json({ data: [listing(101)], next_after_id: null }));
+  await new Promise((resolve) => setImmediate(resolve));
+  await page.run("loadHackathons()");
+  await page.login();
+  assert.equal(page.storage.get("hackscout-saved:user:account-a"), '["101"]');
+  page.setListings(() => Response.json({ error: "offline" }, { status: 503 }));
+  await page.run("loadHackathons()");
+  assert.equal(page.storage.get("hackscout-saved:user:account-a"), '["101"]');
+  assert.equal(page.element("#saved-count").textContent, 1);
+});
+
+test("clear browser data removes all scoped saves but leaves unrelated storage", async () => {
+  const page = createPage({ savedEntries: [
+    ["hackscout-saved:user:account-a", '["1"]'], ["hackscout-saved:user:account-b", '["2"]'],
+    ["hackscout-saved:guest", '["3"]'],
+  ] });
+  page.run("clearHackScoutBrowserData()");
+  assert.deepEqual([...page.storage.keys()], ["unrelated-setting"]);
 });

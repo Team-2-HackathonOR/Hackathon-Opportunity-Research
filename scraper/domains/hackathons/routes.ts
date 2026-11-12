@@ -82,6 +82,12 @@ const fetchHackathons = async (request: Request, response: Response): Promise<vo
 
 // Batch persistence walks the known page range and stores each normalized page in MongoDB.
 const persistAllHackathons = async (request: Request, response: Response): Promise<void> => {
+  const runTimestamp = request.get('x-pipeline-fetched-at');
+  if (runTimestamp && (!Number.isFinite(Date.parse(runTimestamp)) ||
+      new Date(runTimestamp).toISOString() !== runTimestamp)) {
+    response.status(400).json({ error: 'The pipeline timestamp must be an ISO UTC timestamp.' });
+    return;
+  }
   const requestedStartPage =
     parsePositiveInteger(request.query.startPage) ?? parsePositiveInteger(request.query.page) ?? 1;
   const requestedMaxPages = parsePositiveInteger(request.query.maxPages);
@@ -133,7 +139,7 @@ const persistAllHackathons = async (request: Request, response: Response): Promi
         ? paginationAnalysis.totalPages
         : Math.min(paginationAnalysis.totalPages, requestedStartPage + requestedMaxPages - 1);
     const pagesRequested = finalPage - requestedStartPage + 1;
-    const fetchedAt = new Date().toISOString();
+    const fetchedAt = runTimestamp || new Date().toISOString();
     const uniqueHackathonIds = new Set<number>();
     let pagesPersisted = 0;
     let hackathonsPersisted = 0;
@@ -214,6 +220,9 @@ const persistAllHackathons = async (request: Request, response: Response): Promi
       lastSuccessfulPage = page;
     }
 
+    const runUniqueHackathonsPersisted = runTimestamp
+      ? await (await getHackathonsCollection()).countDocuments({ fetchedAt })
+      : undefined;
     response.json({
       sourceUrl: firstPageUrl,
       fetchedAt,
@@ -227,6 +236,7 @@ const persistAllHackathons = async (request: Request, response: Response): Promi
       pagesPersisted,
       hackathonsPersisted,
       uniqueHackathonsPersisted: uniqueHackathonIds.size,
+      ...(runTimestamp ? { runUniqueHackathonsPersisted } : {}),
       paginationAnalysis,
       persisted: true,
       cacheEndpoint: '/hackathons/cache',

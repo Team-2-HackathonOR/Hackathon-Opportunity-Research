@@ -1,6 +1,7 @@
 const express = require("express");
 const { createPipelineController } = require("./pipeline");
 const { createPipelineSchedule } = require("./pipeline-schedule");
+const { createDurablePipelineRuntime, PipelineWorkerError } = require("./durable-pipeline");
 
 class AdminError extends Error {
   constructor(status, message) {
@@ -84,8 +85,10 @@ function createAdminRouter(
   scheduleOptions = {},
 ) {
   const router = express.Router();
-  const pipeline = createPipelineController();
-  const schedule = createPipelineSchedule(pipeline, scheduleOptions);
+  const durable = process.env.VERCEL === "1" || !!process.env.PIPELINE_WORKER_URL;
+  const runtime = durable ? createDurablePipelineRuntime() : null;
+  const pipeline = runtime ? runtime.pipeline : createPipelineController();
+  const schedule = runtime ? runtime.schedule : createPipelineSchedule(pipeline, scheduleOptions);
   router.closeScheduler = () => schedule.close();
   router.use((_request, response, next) => {
     response.set("Cache-Control", "no-store");
@@ -196,21 +199,21 @@ function createAdminRouter(
     next();
   });
   router.get("/session", (request, response) => response.json(request.adminUser));
-  router.get("/pipeline", (_request, response) => response.json({ job: pipeline.get() }));
-  router.get("/pipeline/schedule", (_request, response) => response.json({ schedule: schedule.get() }));
-  router.post("/pipeline/schedule", express.json({ limit: "1kb" }), (request, response) => {
+  router.get("/pipeline", async (_request, response) => response.json({ job: await pipeline.get() }));
+  router.get("/pipeline/schedule", async (_request, response) => response.json({ schedule: await schedule.get() }));
+  router.post("/pipeline/schedule", express.json({ limit: "1kb" }), async (request, response) => {
     const frequency = request.body?.frequency;
     if (!["off", "weekly", "biweekly", "monthly"].includes(frequency)) {
       throw new AdminError(400, "Choose disabled, weekly, every two weeks, or monthly.");
     }
-    if (frequency !== "off" && !process.env.AI_API_KEY?.trim()) {
+    if (!durable && frequency !== "off" && !process.env.AI_API_KEY?.trim()) {
       throw new AdminError(400, "Configure AI_API_KEY on the HackScout backend before enabling automatic runs.");
     }
-    response.json({ schedule: schedule.update(frequency) });
+    response.json({ schedule: await schedule.update(frequency) });
   });
-  router.post("/pipeline/run", express.json({ limit: "8kb" }), (request, response) => {
+  router.post("/pipeline/run", express.json({ limit: "8kb" }), async (request, response) => {
     const apiKey = text(request.body?.apiKey, "AI API key", 4096, true);
-    const job = pipeline.start(apiKey);
+    const job = await pipeline.start(apiKey);
     if (!job) throw new AdminError(409, "A pipeline run is already in progress.");
     response.status(202).json({ job });
   });
@@ -313,9 +316,9 @@ function createAdminRouter(
   });
   router.use((error, _request, response, _next) => {
     console.error("Admin request failed:", error);
-    const status = error instanceof AdminError ? error.status
+    const status = error instanceof AdminError || error instanceof PipelineWorkerError ? error.status
       : error.type === "entity.parse.failed" ? 400 : error.type === "entity.too.large" ? 413 : 502;
-    const message = error instanceof AdminError ? error.message
+    const message = error instanceof AdminError || error instanceof PipelineWorkerError ? error.message
       : status === 400 ? "Enter valid JSON." : status === 413 ? "The request is too large."
         : "The admin service is unavailable. Check the authentication gateway and database configuration.";
     response.status(status).json({ error: message });

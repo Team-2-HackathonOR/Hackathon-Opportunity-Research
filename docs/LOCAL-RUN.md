@@ -228,7 +228,13 @@ Pipeline stages call internal gateway routes rather than the services directly.
 Both services must use the same MongoDB database and collection.
 ETL must point to the research database used by public listings.
 
-Only one pipeline runs at a time per standalone API process. The dashboard
+For Vercel, use the [durable workflow worker](../pipeline-worker/README.md) instead
+of this local in-memory runner. Setting `PIPELINE_WORKER_URL` also lets local
+admin requests use that worker and its database-wide concurrency protection.
+Manual keys are encrypted temporarily by the worker; automatic runs use the
+worker's `AI_API_KEY`. Vercel does not use this section's file store or timer.
+
+Only one local pipeline runs at a time per standalone API process. The dashboard
 polls its stage and result; closing the page does not cancel a run. Run status
 includes deletion counts and server-recorded start/end timestamps for reset, scraper and ETL. Animated
 stage cards show live elapsed time and freeze each duration when that stage
