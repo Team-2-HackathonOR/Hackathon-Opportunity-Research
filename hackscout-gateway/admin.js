@@ -179,7 +179,20 @@ function createAdminRouter(
   });
 
   router.use(async (request, _response, next) => {
-    request.adminUser = await verifiedAdmin(request.headers.authorization);
+    if (request.gatewayAuthenticated) {
+      const id = request.get("x-user-id");
+      const email = request.get("x-user-email");
+      if (request.get("x-user-role") !== "admin") {
+        throw new AdminError(403, "An administrator role is required.");
+      }
+      if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
+          !email || !/^[^\s@]+@[^\s@]+$/.test(email)) {
+        throw new AdminError(401, "The gateway did not supply a valid administrator identity.");
+      }
+      request.adminUser = { id, email, role: "admin" };
+    } else {
+      request.adminUser = await verifiedAdmin(request.headers.authorization);
+    }
     next();
   });
   router.get("/session", (request, response) => response.json(request.adminUser));
