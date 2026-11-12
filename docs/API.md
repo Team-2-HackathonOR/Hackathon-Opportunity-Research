@@ -15,11 +15,26 @@ It returns HTTP 201 with the same session shape as login. Existing emails return
 409 without changing the account. HackScout forwards these calls through its
 main gateway on port 4000 directly via the static frontend's proxy.
 
+`DELETE /api/auth/account` requires any signed-in role and
+`{"password":"current-password","confirmation":"DELETE"}`. It targets only
+the bearer token owner; client-supplied user IDs are rejected. The gateway
+rechecks the password, deletes linked research personal data, then deletes the
+account, token records and related invitations. Returns `{deleted:true}`.
+Wrong passwords return 403; seed-managed accounts return 409 until their seed
+configuration is removed. Linked-data cleanup failure returns 502 without
+deleting the account. These two databases are not one atomic transaction:
+research data may already be gone if final account deletion fails. Public
+events, anonymous submissions and browser bookmarks remain. External directory
+accounts, infrastructure logs and backups are outside this action.
+
 HackScout guest listings use `GET /api/hackscout/hackathons`; suggestions use
 `POST /api/hackscout/suggestions`. These are public but gateway-rate-limited.
 Admin operations use `/api/hackscout/admin/*` and require an admin JWT (login
-is public). The gateway forwards these paths to the protected HackScout backend
-with its internal caller and secret. Existing protected `/api/hackathons`
+is public). Listings, submissions, and `/api/hackscout/admin/suggestions`
+(including `/:id/review`) go to the Hackathon Service using its PostgreSQL
+connection. Login and pipeline operations still go to the protected HackScout
+backend. Both upstreams receive trusted gateway headers.
+Existing protected `/api/hackathons`
 research-service routes are unchanged.
 
 Manual ETL operations use `/api/etl/*` with an admin JWT; for example
@@ -27,9 +42,16 @@ Manual ETL operations use `/api/etl/*` with an admin JWT; for example
 use the existing authenticated `/api/scraper/*` prefix, which strips that
 prefix before forwarding to the scraper.
 
-Pipeline requests use `/api/internal/scraper/hackathons/persist-all` and
+Pipeline requests first use `POST /api/internal/scraper/hackathons/reset`
+(returns `{reset:true,deletedRecords}`), then `POST /api/internal/hackathons/reset`
+(returns `{reset:true,deletedEvents}`), followed by
+`GET /api/internal/scraper/hackathons/persist-all` and
 `/api/internal/etl/etl/import/mongodb`; only trusted internal callers with the
 gateway secret can access these. Browser JWTs alone cannot call these routes.
+Resets delete scraper collection contents and research events plus dependent
+records, preserving accounts, review history, categories and team members.
+Review links to deleted events are cleared. A failed reset prevents scraping;
+the databases are reset sequentially, so partial resets are possible.
 
 Rate limiting uses an in-memory, per-process IP counter: 300 requests per
 60 seconds by default (`RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MS`). Authentication
@@ -199,6 +221,28 @@ All other endpoints require `Authorization: Bearer <jwt>` and recheck the
 current admin role. There is no `X-Admin-Key` fallback on these endpoints.
 Responses use `Cache-Control: no-store`.
 
+The browser admin UI now uses these additional gateway-hosted routes, relative
+to `/api/hackscout/admin`, rather than the legacy bearer-returning login below:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/auth/access` | `{email}`; returns `{email,passwordSetupRequired}` for pre-approved admins only |
+| POST | `/auth/login` | `{email,password}`; verifies admin role and sets an HttpOnly cookie; returns `{user}`, no token |
+| POST | `/auth/create-password` | `{email,password}`; sets the first password on a pre-approved passwordless local admin and sets the session cookie |
+| GET | `/auth/session` | Restore a current admin cookie session; returns `{user}` |
+| POST | `/auth/logout` | Revoke the current session and expire its cookie |
+
+These mutations require `x-hackscout-admin: 1` from same-origin browser code.
+Cookie-authenticated moderation/pipeline mutations require the same header.
+Cookies are host-only, HttpOnly, SameSite=Lax, scoped to
+`/api/hackscout/admin`, Secure in production, and expire with the JWT. Bearer
+authentication remains supported for existing API clients. Access/login/setup
+are public but rate-limited to 30 requests per minute. Setup requires 8
+characters and at most 72 UTF-8 bytes, rejects existing passwords/LDAP accounts,
+and never creates an account or changes its role. Matching Weather,
+first-password setup intentionally does not prove email ownership: provision
+passwordless admin accounts only for immediate activation by the intended owner.
+
 | Method | Path | Purpose |
 |--------|------|---------|
 | POST | `/login` | Existing `{email,password}` login; returns `{token,user}` |
@@ -206,7 +250,7 @@ Responses use `Cache-Control: no-store`.
 | POST | `/logout` | Revoke the current JWT; returns `{status:"signed_out"}` |
 | GET | `/suggestions` | Searchable, paginated submission queue |
 | POST | `/suggestions/:id/review` | Atomically approve/publish or reject |
-| POST | `/pipeline/run` | Start scraper then ETL with a run-only `{apiKey}`; returns HTTP 202 `{job}` |
+| POST | `/pipeline/run` | Reset both databases, then scraper and ETL with a run-only `{apiKey}`; returns HTTP 202 `{job}` |
 | GET | `/pipeline` | Current run stage, counts, and failure status; returns `{job}` |
 | GET | `/pipeline/schedule` | Saved frequency, next run, timezone, and server-key availability |
 | POST | `/pipeline/schedule` | Save `{frequency:"off"|"weekly"|"biweekly"|"monthly"}`; requires server AI_API_KEY unless off |

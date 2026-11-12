@@ -114,3 +114,67 @@ accountElement("account-menu").addEventListener("click", async () => {
   accountElement("account-email").focus();
   window.scrollTo(0, 0);
 });
+
+function showAccountData() {
+  accountElement("account-data-feedback").textContent = "";
+  accountElement("clear-browser-confirm").checked = false;
+  accountElement("delete-account-form").reset();
+  accountElement("delete-account-form").hidden = !accountSession;
+  accountElement("delete-account-description").textContent = accountSession
+    ? `Delete ${accountSession.user.email}, all sign-in sessions and invitations to or from this account. Linked team-member records, contributions and verifications are removed; moderator identity and notes are anonymized. Public listings and anonymous submissions stay. This cannot be undone. Directory accounts, if any, are not deleted from the external directory.`
+    : "Sign in to delete your account and its linked server-side data.";
+  accountElement("account-data-dialog").showModal();
+}
+accountElement("account-data-entry").addEventListener("click", showAccountData);
+accountElement("account-data-open").addEventListener("click", showAccountData);
+accountElement("account-data-close").addEventListener("click", () => accountElement("account-data-dialog").close());
+accountElement("account-data-dialog").addEventListener("close", () => {
+  accountElement("delete-account-form").reset();
+});
+accountElement("account-data-dialog").addEventListener("cancel", (event) => {
+  if (accountBusy) event.preventDefault();
+});
+accountElement("clear-browser-data").addEventListener("click", () => {
+  if (!accountElement("clear-browser-confirm").checked) {
+    accountElement("account-data-feedback").textContent = "Confirm that you want to clear browser data.";
+    return;
+  }
+  try {
+    clearHackScoutBrowserData();
+    accountElement("clear-browser-confirm").checked = false;
+    accountElement("account-data-feedback").textContent = "Saved hackathons and filters cleared in this browser. Your account is unchanged.";
+  } catch (error) {
+    console.error("Could not clear HackScout browser data:", error);
+    accountElement("account-data-feedback").textContent = `Could not finish clearing browser data: ${error.message}`;
+  }
+});
+accountElement("delete-account-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (accountBusy || !accountSession) return;
+  if (accountElement("delete-account-confirmation").value !== "DELETE") {
+    accountElement("account-data-feedback").textContent = "Type DELETE to confirm permanent account deletion.";
+    return;
+  }
+  accountSetBusy(true);
+  for (const id of ["delete-account-submit", "clear-browser-data", "account-data-close"]) accountElement(id).disabled = true;
+  accountElement("account-data-feedback").textContent = "Deleting your account and linked data...";
+  try {
+    const result = await accountRequest("account", {
+      method: "DELETE", body: { password: accountElement("delete-account-password").value, confirmation: "DELETE" },
+    });
+    if (result.deleted !== true) throw new Error("The service did not confirm account deletion.");
+    accountSession = null;
+    accountShowApplication();
+    accountElement("delete-account-form").hidden = true;
+    accountElement("delete-account-description").textContent = "Your account has been deleted and all its sessions are invalid. Saved browser data is separate; use Clear browser data to remove it.";
+    accountElement("account-data-feedback").textContent = "Your account and linked server-side data have been deleted.";
+  } catch (error) {
+    console.error("HackScout account deletion failed:", error.message);
+    accountElement("account-data-feedback").textContent = error.message;
+  } finally {
+    accountElement("delete-account-password").value = "";
+    accountElement("delete-account-confirmation").value = "";
+    accountSetBusy(false);
+    for (const id of ["delete-account-submit", "clear-browser-data", "account-data-close"]) accountElement(id).disabled = false;
+  }
+});

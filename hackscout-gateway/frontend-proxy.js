@@ -29,6 +29,12 @@ function createFrontendProxy() {
       const value = request.get(name);
       if (value) headers[name] = value;
     }
+    if (request.path.startsWith("/admin/")) {
+      for (const name of ["cookie", "x-hackscout-admin"]) {
+        const value = request.get(name);
+        if (value) headers[name] = value;
+      }
+    }
 
     let upstream;
     let body;
@@ -53,6 +59,10 @@ function createFrontendProxy() {
     for (const name of ["content-type", "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset"]) {
       const value = upstream.headers.get(name);
       if (value) response.set(name, value);
+    }
+    if (request.path.startsWith("/admin/")) {
+      const cookies = upstream.headers.getSetCookie();
+      if (cookies.length) response.set("Set-Cookie", cookies);
     }
     return response.status(upstream.status).send(body);
   });

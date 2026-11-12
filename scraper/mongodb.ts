@@ -10,11 +10,11 @@ export type StoredHackathon = ScrapedHackathon & {
 const DATABASE_NAME = process.env.MONGODB_DATABASE_NAME?.trim() || 'hackathon-opportunity-research';
 const HACKATHONS_COLLECTION = process.env.MONGODB_COLLECTION_NAME?.trim() || 'hackathons';
 
-let client: MongoClient | null = null;
+let clientConnection: Promise<MongoClient> | null = null;
 
 const getMongoClient = async (): Promise<MongoClient> => {
-  if (client) {
-    return client;
+  if (clientConnection) {
+    return clientConnection;
   }
 
   const connectionString = process.env.MONGODB_CONNECTION_STRING?.trim();
@@ -25,10 +25,18 @@ const getMongoClient = async (): Promise<MongoClient> => {
     );
   }
 
-  client = new MongoClient(connectionString);
-  await client.connect();
-
-  return client;
+  const candidate = new MongoClient(connectionString);
+  clientConnection = (async () => {
+    try {
+      await candidate.connect();
+      return candidate;
+    } catch (error) {
+      clientConnection = null;
+      await candidate.close();
+      throw error;
+    }
+  })();
+  return clientConnection;
 };
 
 export const getHackathonsCollection = async (): Promise<Collection<StoredHackathon>> => {

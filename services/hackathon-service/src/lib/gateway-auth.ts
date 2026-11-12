@@ -42,6 +42,10 @@ export function authorizeServiceRequest(
     };
   }
 
+  if (path === "/api/internal/pipeline/reset") {
+    return null;
+  }
+
   if (!headerValue(headers[USER_ID_HEADER]) || !headerValue(headers[USER_ROLE_HEADER])) {
     return {
       status: 403,

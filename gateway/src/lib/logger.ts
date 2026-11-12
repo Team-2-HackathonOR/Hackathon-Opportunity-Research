@@ -16,6 +16,8 @@ const LEVEL_LABELS: Record<number, string> = {
 export const logRedact = {
   paths: [
     "req.headers.authorization",
+    "req.headers.cookie",
+    'res.headers["set-cookie"]',
     'req.headers["x-admin-key"]',
     'req.headers["x-api-key"]',
     'req.headers["x-gateway-secret"]',

@@ -24,6 +24,33 @@ tracks, benefits, sources, and application requirements. The public
 `/api/hackscout/hackathons` gateway route uses this option for HackScout;
 other Hackathon Service API routes retain their normal gateway authentication.
 
+Suggestions and moderation use the same PostgreSQL connection:
+`POST /api/suggestions`, `GET /api/admin/suggestions`, and
+`POST /api/admin/suggestions/:id/review`. Admin routes require a trusted
+gateway admin identity. Apply `20261106170000_event_suggestion_moderation.sql`
+to this database; approval uses its atomic `public.moderate_event_suggestion`
+function. The connection role must have access to the suggestions table and
+permission to execute that function. Supabase REST keys are not required.
+
+The internal pipeline uses `POST /api/internal/pipeline/reset` through the
+gateway's `POST /api/internal/hackathons/reset`. A trusted gateway caller and
+shared secret are required; this route does not need a user identity.
+It atomically clears event links in suggestions, deletes event-linked
+contributions and deletes all events (dependent records cascade). Accounts,
+suggestions/review history, categories and team members remain intact.
+The moderation migration must already be applied. Returns
+`{reset:true,deletedEvents}` only after commit. Every manual and scheduled
+pipeline run invokes this reset before scraping; failures stop the pipeline.
+
+Account deletion also uses internal `DELETE /api/account-data` with trusted
+gateway identity headers (`x-user-id`, `x-user-email`, `x-user-role`). The gateway
+verifies the user's password before calling it. Within one transaction it removes
+matching-email team members and their contributions/verifications, and clears
+that account's reviewer ID and review notes. Other member references become null
+through existing foreign keys. Public events, anonymous suggestions and other
+users' records remain. The gateway deletes the separate auth account only after
+this cleanup succeeds.
+
 ## Scripts
 
 | Command | Purpose |

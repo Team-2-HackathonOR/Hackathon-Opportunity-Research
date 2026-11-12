@@ -26,6 +26,8 @@ test("deployed frontend forwards browser APIs while backend routes stay protecte
       response.writeHead(upstreamStatus, {
         "content-type": "application/json",
         "x-ratelimit-remaining": "12",
+        ...(request.url.startsWith("/api/hackscout/admin/")
+          ? { "set-cookie": "hackscout_admin=fixture; Path=/api/hackscout/admin; HttpOnly; SameSite=Lax" } : {}),
       });
       response.end(JSON.stringify({ data: [{ event_id: 1, event_name: "Test Hackathon" }], count: 1 }));
     });
@@ -76,10 +78,23 @@ test("deployed frontend forwards browser APIs while backend routes stay protecte
     const response = await fetch(`${base}/api/auth/me`, {
       headers: { authorization: "Bearer fixture" },
     });
+
     assert.equal(response.status, 200);
     assert.equal(seen.at(-1).path, "/api/auth/me");
     assert.equal(seen.at(-1).headers.authorization, "Bearer fixture");
     assert.equal(seen.at(-1).headers["x-gateway-secret"], undefined);
+  });
+
+  await t.test("admin cookies and CSRF header survive the frontend proxy without leaking to public APIs", async () => {
+    const headers = { cookie: "hackscout_admin=fixture", "x-hackscout-admin": "1" };
+    const response = await fetch(`${base}/api/hackscout/admin/auth/session`, { headers });
+    assert.equal(response.status, 200);
+    assert.equal(seen.at(-1).headers.cookie, headers.cookie);
+    assert.equal(seen.at(-1).headers["x-hackscout-admin"], "1");
+    assert.match(response.headers.get("set-cookie"), /HttpOnly/);
+    await fetch(`${base}/api/hackscout/hackathons`, { headers });
+    assert.equal(seen.at(-1).headers.cookie, undefined);
+    assert.equal(seen.at(-1).headers["x-hackscout-admin"], undefined);
   });
 
   await t.test("backend routes still deny direct requests and admin assets are available", async () => {

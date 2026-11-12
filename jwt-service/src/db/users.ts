@@ -26,6 +26,14 @@ export type RegistrationStore = {
   createViewer(email: string, passwordHash: string): Promise<AppUser | null>;
 };
 
+export type AdminSetupStore = {
+  setInitialAdminPassword(email: string, passwordHash: string): Promise<AppUser | null>;
+};
+
+export type AccountDeletionStore = {
+  deleteAccount(id: string): Promise<boolean>;
+};
+
 export type DirectoryAccountInput = {
   email: string;
   role: Role;
@@ -64,7 +72,7 @@ const userColumns = "id, email, password_hash, role, auth_source, ldap_dn";
 
 export function createPgUserDirectory(
   source: Pick<JwtEnv, "AUTH_DATABASE_URL" | "DATABASE_URL" | "DATABASE_SSL">,
-): UserDirectory & InvitationStore & RegistrationStore {
+): UserDirectory & InvitationStore & RegistrationStore & AdminSetupStore & AccountDeletionStore {
   const pool = new pg.Pool({
     connectionString: authDatabaseUrl(source),
     max: 5,
@@ -110,6 +118,38 @@ export function createPgUserDirectory(
     ...invitations,
     tokens,
     findByEmail,
+    async deleteAccount(id) {
+      const client = await pool.connect();
+      try {
+        await client.query("begin");
+        const account = await client.query<{ email: string }>(
+          "select email from app_auth.app_users where id = $1 for update", [id],
+        );
+        if (!account.rows[0]) {
+          await client.query("rollback");
+          return false;
+        }
+        await client.query("delete from app_auth.jwt_tokens where user_id = $1", [id]);
+        await client.query("delete from app_auth.invitations where invited_by = $1 or lower(email) = lower($2)", [id, account.rows[0].email]);
+        await client.query("delete from app_auth.app_users where id = $1", [id]);
+        await client.query("commit");
+        return true;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    async setInitialAdminPassword(email, passwordHash) {
+      const result = await pool.query<UserRow>(
+        `update app_auth.app_users set password_hash = $2
+         where email = $1 and role = 'admin' and auth_source = 'local' and password_hash is null
+         returning ${userColumns}`,
+        [email, passwordHash],
+      );
+      return mapUser(result.rows[0]);
+    },
     async createViewer(email, passwordHash) {
       const result = await pool.query<UserRow>(
         `insert into app_auth.app_users (email, password_hash, role, auth_source)

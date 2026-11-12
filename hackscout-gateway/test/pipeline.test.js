@@ -4,7 +4,16 @@ const { createServer } = require("node:http");
 const { mkdtempSync, rmSync } = require("node:fs");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
-const { createPipelineController } = require("../pipeline");
+const { createPipelineController: createRealPipelineController } = require("../pipeline");
+function createPipelineController(requestService) {
+  if (!requestService) return createRealPipelineController();
+  return createRealPipelineController((url, options) => {
+    if (new URL(url).pathname.endsWith("/reset")) {
+      return Promise.resolve(json({ reset: true, deletedRecords: 2, deletedEvents: 3 }));
+    }
+    return requestService(url, options);
+  });
+}
 const { createPipelineSchedule } = require("../pipeline-schedule");
 
 const scrape = {
@@ -34,6 +43,7 @@ test("stage durations follow server time and completed stages retain their end t
   const responses = [];
   const controller = createPipelineController(() => new Promise((resolve) => responses.push(resolve)));
   controller.start("run-only-fixture");
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(controller.get().steps.etl, { status: "waiting" });
   t.mock.timers.setTime(Date.parse("2026-11-11T12:00:20Z"));
   responses[0](json(scrape));
@@ -94,7 +104,7 @@ test("pipeline runs scraper then all matching ETL records with a transient key",
   assert.equal(JSON.stringify(result).includes("run-only-fixture"), false);
   assert.equal(result.steps.scraper.status, "completed");
   assert.equal(result.steps.etl.status, "completed");
-  assert.equal(result.steps.scraper.startedAt, result.startedAt);
+  assert.equal(result.steps.scraper.startedAt, result.steps.reset.finishedAt);
   assert.equal(result.steps.scraper.finishedAt, result.steps.etl.startedAt);
   assert.equal(result.steps.etl.finishedAt, result.finishedAt);
 });
@@ -109,7 +119,10 @@ test("production pipeline HTTP client sends the ETL body and completes", async (
       seen.push(request.url);
       assert.equal(request.headers["x-ai-api-key"], "run-only-fixture");
       response.setHeader("content-type", "application/json");
-      if (request.method === "GET") response.end(JSON.stringify(scrape));
+      if (request.url.endsWith("/reset")) {
+        assert.deepEqual(JSON.parse(body), {});
+        response.end(JSON.stringify({ reset: true, deletedRecords: 2, deletedEvents: 3 }));
+      } else if (request.method === "GET") response.end(JSON.stringify(scrape));
       else {
         assert.equal(JSON.parse(body).fetched_at, scrape.fetchedAt);
         response.end(JSON.stringify({ processed_count: 3, inserted_count: 3, failed_count: 0 }));
@@ -128,7 +141,69 @@ test("production pipeline HTTP client sends the ETL body and completes", async (
   const controller = createPipelineController();
   controller.start("run-only-fixture");
   assert.equal((await finish(controller)).status, "completed");
-  assert.deepEqual(seen, ["/api/internal/scraper/hackathons/persist-all?startPage=1", "/api/internal/etl/etl/import/mongodb"]);
+  assert.deepEqual(seen, [
+    "/api/internal/scraper/hackathons/reset", "/api/internal/hackathons/reset",
+    "/api/internal/scraper/hackathons/persist-all?startPage=1", "/api/internal/etl/etl/import/mongodb",
+  ]);
+});
+
+test("manual and scheduled pipelines reset both databases before scraping", async (t) => {
+  for (const scheduled of [false, true]) {
+    await t.test(scheduled ? "scheduled" : "manual", async (child) => {
+      const calls = [];
+      const controller = createRealPipelineController(async (url, options) => {
+        const path = new URL(url).pathname;
+        calls.push(path);
+        if (path.endsWith("/reset")) {
+          assert.equal(options.method, "POST");
+          return json({ reset: true, deletedRecords: 2, deletedEvents: 3 });
+        }
+        return json(path.includes("persist-all") ? scrape
+          : { processed_count: 3, inserted_count: 3, failed_count: 0 });
+      });
+      if (scheduled) {
+        const directory = mkdtempSync(join(tmpdir(), "hackscout-reset-schedule-"));
+        child.after(() => rmSync(directory, { recursive: true }));
+        let now = new Date("2026-11-11T12:00:00Z");
+        const schedule = createPipelineSchedule(controller, {
+          storePath: join(directory, "schedule.json"), now: () => now,
+          getApiKey: () => "fixture", startTimer: false,
+        });
+        schedule.update("weekly");
+        now = new Date("2026-11-15T01:00:00Z");
+        schedule.tick();
+      } else controller.start("fixture");
+      const result = await finish(controller);
+      assert.equal(result.status, "completed");
+      assert.equal(result.steps.reset.status, "completed");
+      assert.deepEqual(result.reset, { mongodb: 2, postgresql: 3 });
+      assert.deepEqual(calls, [
+        "/api/internal/scraper/hackathons/reset", "/api/internal/hackathons/reset",
+        "/api/internal/scraper/hackathons/persist-all", "/api/internal/etl/etl/import/mongodb",
+      ]);
+    });
+  }
+});
+
+test("reset errors and invalid summaries stop before scraping or importing", async (t) => {
+  t.mock.method(console, "error", () => {});
+  for (const failAt of [1, 2]) {
+    for (const response of [json({}, 503), json({ reset: true, deletedEvents: -1 })]) {
+      let calls = 0;
+      const controller = createRealPipelineController(async () => {
+        calls += 1;
+        return calls === failAt ? response : json({ reset: true, deletedRecords: 0 });
+      });
+      controller.start("fixture");
+      const result = await finish(controller);
+      assert.equal(calls, failAt);
+      assert.equal(result.stage, "reset");
+      assert.equal(result.status, "failed");
+      assert.equal(result.steps.scraper.status, "skipped");
+      assert.equal(result.steps.etl.status, "skipped");
+      assert.equal(result.steps.reset.finishedAt, result.finishedAt);
+    }
+  }
 });
 
 test("failed scraper stops pipeline before ETL", async (t) => {

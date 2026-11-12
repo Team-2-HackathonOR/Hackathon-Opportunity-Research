@@ -12,6 +12,7 @@ import { accessControlPlugin } from "./plugins/access-control-plugin.js";
 import { jwtAuthPlugin } from "./plugins/jwt-auth.js";
 import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
+import { adminSessionRoutes } from "./routes/admin-session.js";
 import { gatewayInfoRoutes } from "./routes/gateway-info.js";
 import { healthRoutes } from "./routes/health.js";
 import { hackscoutRoutes } from "./routes/hackscout.js";
@@ -58,6 +59,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(healthRoutes);
   await app.register(gatewayInfoRoutes);
   await app.register(authRoutes);
+  await app.register(adminSessionRoutes);
   await app.register(hackscoutRoutes);
   await app.register(adminRoutes);
   await app.register(serviceProxyRoutes);

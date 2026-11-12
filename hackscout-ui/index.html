@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body id="hackscout-page">
     <main id="account-entrance" class="account-entrance">
       <section class="account-card" aria-labelledby="account-title">
         <a class="brand" href="/" aria-label="HackScout home">hackscout<span class="brand-period">.</span></a>
@@ -31,6 +31,7 @@
           <p id="account-feedback" role="status" aria-live="polite"></p>
         </form>
         <button id="account-guest" class="account-guest" type="button">Continue as guest</button>
+        <button id="account-data-entry" class="account-guest" type="button">Manage my data</button>
         <p class="account-hint">Your sign-in session stays in page memory only. Reloading requires signing in again.</p>
       </section>
     </main>
@@ -44,6 +45,7 @@
       </nav>
       <a class="submit-event" href="#list-event">List an event <span>↗</span></a>
       <button class="submit-event account-menu" id="account-menu" type="button">Sign in / Create account</button>
+      <button class="submit-event account-menu" id="account-data-open" type="button">My data</button>
       <button class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Toggle navigation">☰</button>
     </header>
 
@@ -145,6 +147,26 @@
     </div>
 
     <div class="modal-backdrop" id="event-modal" aria-hidden="true"><section class="event-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-close" id="modal-close" aria-label="Close">×</button><div id="modal-content"></div></section></div>
+    <dialog id="account-data-dialog" class="account-card account-data-dialog" aria-labelledby="account-data-title">
+      <h2 id="account-data-title">Manage my data</h2>
+      <section>
+        <h3>Clear browser data</h3>
+        <p>Remove saved hackathons and reset filters in this browser only. This does not sign you out or delete your account.</p>
+        <label><input id="clear-browser-confirm" type="checkbox" /> I want to clear my saved HackScout data on this device.</label>
+        <button id="clear-browser-data" class="account-guest" type="button">Clear browser data</button>
+      </section>
+      <section>
+        <h3>Delete my account</h3>
+        <p id="delete-account-description">Sign in to delete your account and its linked server-side data.</p>
+        <form id="delete-account-form" hidden>
+          <label>Current password<input id="delete-account-password" type="password" autocomplete="current-password" required maxlength="1024" /></label>
+          <label>Type DELETE to confirm<input id="delete-account-confirmation" type="text" autocomplete="off" pattern="DELETE" required /></label>
+          <button id="delete-account-submit" class="account-danger" type="submit">Permanently delete my account</button>
+        </form>
+      </section>
+      <p id="account-data-feedback" role="status" aria-live="polite"></p>
+      <button id="account-data-close" class="account-guest" type="button">Close</button>
+    </dialog>
     <script src="app.js"></script>
     <script src="auth.js"></script>
   </body>

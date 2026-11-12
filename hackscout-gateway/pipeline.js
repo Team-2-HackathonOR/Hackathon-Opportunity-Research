@@ -62,6 +62,21 @@ function createPipelineController(requestService = requestPipelineService) {
 
   async function execute(job, apiKey) {
     try {
+      for (const [database, route, countField] of [
+        ["mongodb", "/api/internal/scraper/hackathons/reset", "deletedRecords"],
+        ["postgresql", "/api/internal/hackathons/reset", "deletedEvents"],
+      ]) {
+        const result = await serviceRequest(route, apiKey, {});
+        if (result.reset !== true || !Number.isInteger(result[countField]) || result[countField] < 0) {
+          throw new Error(`Invalid ${database} reset summary. Scraping was not started.`);
+        }
+        job.reset[database] = result[countField];
+      }
+      job.steps.reset.status = "completed";
+      job.steps.reset.finishedAt = new Date().toISOString();
+      job.stage = "scraper";
+      job.steps.scraper.status = "running";
+      job.steps.scraper.startedAt = job.steps.reset.finishedAt;
       const scrape = await serviceRequest(
         "/api/internal/scraper/hackathons/persist-all?startPage=1", apiKey,
       );
@@ -103,14 +118,17 @@ function createPipelineController(requestService = requestPipelineService) {
       console.error(`Admin pipeline failed at ${job.stage}.`);
       job.status = "failed";
       job.steps[job.stage].status = "failed";
-      if (job.stage === "scraper") job.steps.etl.status = "skipped";
+      for (const step of Object.values(job.steps)) {
+        if (step.status === "waiting") step.status = "skipped";
+      }
       job.error = error instanceof SyntaxError ? "Service returned invalid JSON."
         : error instanceof TypeError ? "Service could not be reached."
           : error.name === "TimeoutError" ? "Service timed out."
             : error.message;
     } finally {
       job.finishedAt = new Date().toISOString();
-      const lastStep = job.steps.etl.startedAt ? job.steps.etl : job.steps.scraper;
+      const lastStep = job.steps.etl.startedAt ? job.steps.etl
+        : job.steps.scraper.startedAt ? job.steps.scraper : job.steps.reset;
       lastStep.finishedAt = job.finishedAt;
     }
   }
@@ -119,11 +137,12 @@ function createPipelineController(requestService = requestPipelineService) {
     start(apiKey) {
       if (current?.status === "running") return null;
       current = {
-        id: randomUUID(), status: "running", stage: "scraper",
+        id: randomUUID(), status: "running", stage: "reset", reset: {},
         startedAt: new Date().toISOString(),
       };
       current.steps = {
-        scraper: { status: "running", startedAt: current.startedAt },
+        reset: { status: "running", startedAt: current.startedAt },
+        scraper: { status: "waiting" },
         etl: { status: "waiting" },
       };
       void execute(current, apiKey);
