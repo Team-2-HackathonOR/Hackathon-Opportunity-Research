@@ -36,7 +36,7 @@ describe("gateway routes", () => {
         { path: "/api/exports/*", upstream: "http://127.0.0.1:4001", access: "authenticated" },
         { path: "/api/ai/*", upstream: "not configured", access: "authenticated" },
         { path: "/api/scraper/*", upstream: "not configured", access: "authenticated" },
-        { path: "/api/hackscout/hackathons", upstream: "http://127.0.0.1:3002", access: "public" },
+        { path: "/api/hackscout/hackathons", upstream: "http://127.0.0.1:4001", access: "public" },
         { path: "POST /api/hackscout/suggestions", upstream: "http://127.0.0.1:3002", access: "public" },
         { path: "/api/hackscout/admin/*", upstream: "http://127.0.0.1:3002", access: "admin (login public)" },
         { path: "/api/etl/*", upstream: "http://127.0.0.1:8000", access: "admin" },

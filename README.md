@@ -13,10 +13,14 @@ storage. The main gateway and JWT service are required for account access.
 
 Configure the service environment files, including the same
 `GATEWAY_INTERNAL_SECRET` for the main gateway, HackScout API, scraper, and ETL.
-Configure `SUPABASE_GRAPHQL_URL` and `SUPABASE_API_KEY` on the HackScout API
-with a server-side secret/service-role key. Run the root `npm run dev` and open
+Configure `services/hackathon-service/.env` with its PostgreSQL `DATABASE_URL`
+and the shared `GATEWAY_INTERNAL_SECRET` for live listings. Configure
+`SUPABASE_GRAPHQL_URL` and `SUPABASE_API_KEY` on the standalone HackScout API
+with a server-side secret/service-role key only for suggestions and moderation.
+Run the root `npm run dev` and open
 `http://localhost:3001`. All application API calls go through the main gateway
-on port 4000; the HackScout API on port 3002 is a protected backend.
+on port 4000. HackScout listings come from the Hackathon Service; suggestions
+and moderation use the protected HackScout API on port 3002.
 
 See [local setup](./docs/LOCAL-RUN.md) for the database migrations and the full service launcher, which serves the public UI on `http://localhost:3001`.
 
