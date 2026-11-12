@@ -20,6 +20,8 @@ export async function createRuntime() {
     const app = await buildApp({
       userStore: directory,
       registrationStore: directory,
+      adminSetupStore: directory,
+      accountDeletionStore: directory,
       invitationStore: directory,
       tokenStore: directory.tokens,
       checkDatabase: () => directory.check(),

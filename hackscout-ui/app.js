@@ -240,6 +240,11 @@ function updateSavedCount() {
   $("#saved-count").textContent = saved.size;
   localStorage.setItem("hackscout-saved", JSON.stringify([...saved]));
 }
+function clearHackScoutBrowserData() {
+  saved.clear();
+  clearFilters();
+  localStorage.removeItem("hackscout-saved");
+}
 function eligibilityMatches(event) {
   const student = $("#student-filter").value;
   const undergraduate = $("#undergrad-filter").value;

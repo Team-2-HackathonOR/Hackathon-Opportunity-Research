@@ -34,4 +34,12 @@ test("HackScout auth proxy forwards only supported routes without exposing gatew
   });
   assert.equal(denied.status, 404);
   assert.equal(calls.length, 1);
+  const deletion = await fetch(`${root}/api/auth/account`, {
+    method: "DELETE", headers: { "content-type": "application/json", authorization: "Bearer fixture" },
+    body: JSON.stringify({ password: "current-password", confirmation: "DELETE" }),
+  });
+  assert.equal(deletion.status, 201);
+  assert.equal(calls[1].options.method, "DELETE");
+  assert.equal(calls[1].url.pathname, "/api/auth/account");
+  assert.deepEqual(JSON.parse(calls[1].options.body), { password: "current-password", confirmation: "DELETE" });
 });

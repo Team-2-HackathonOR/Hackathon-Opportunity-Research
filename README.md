@@ -2,25 +2,32 @@
 
 Discover hackathons with topic, keyword, location, date, format, cost, student eligibility, age, and team-rule filters. View event details and official links, save listings, and include closed events.
 
-Visitors can submit event names and websites for review. Suggestions are stored as `pending` in Supabase `public.event_suggestions`; they are not published automatically.
+Visitors can submit event names and websites for review. The Hackathon Service stores suggestions as `pending` in PostgreSQL `public.event_suggestions`; they are not published automatically.
 
 HackScout opens with **Sign in**, **Create account**, and **Continue as guest**.
 Public signup creates a viewer account in the existing authentication database;
 it never grants admin access. Sessions stay in page memory rather than browser
 storage. The main gateway and JWT service are required for account access.
+**My data** offers separate actions to clear device-only saved listings/filters,
+or permanently delete the signed-in account after entering its current password
+and typing `DELETE`. Account deletion removes sessions and related invitations,
+deletes linked team-member/contribution/verification records, and anonymizes
+moderation identity and notes. Public listings and anonymous suggestions stay.
+Clearing browser data does not delete the account, and deleting the account does
+not clear browser bookmarks.
 
 ## Run locally
 
 Configure the service environment files, including the same
 `GATEWAY_INTERNAL_SECRET` for the main gateway, HackScout API, scraper, and ETL.
 Configure `services/hackathon-service/.env` with its PostgreSQL `DATABASE_URL`
-and the shared `GATEWAY_INTERNAL_SECRET` for live listings. Configure
-`SUPABASE_GRAPHQL_URL` and `SUPABASE_API_KEY` on the standalone HackScout API
-with a server-side secret/service-role key only for suggestions and moderation.
+and the shared `GATEWAY_INTERNAL_SECRET` for listings, suggestions, and moderation.
+These features do not require a Supabase API key or exposed API schemas.
 Run the root `npm run dev` and open
 `http://localhost:3001`. All application API calls go through the main gateway
-on port 4000. HackScout listings come from the Hackathon Service; suggestions
-and moderation use the protected HackScout API on port 3002.
+on port 4000. Listings, suggestions, and moderation use the Hackathon Service.
+Admin cookie sign-in is handled by the main gateway and JWT service; pipeline
+controls still use the protected HackScout API on port 3002.
 
 See [local setup](./docs/LOCAL-RUN.md) for the database migrations and the full service launcher, which serves the public UI on `http://localhost:3001`.
 
@@ -39,7 +46,15 @@ remain gateway-only; `/hackscout-admin/` serves the admin UI.
 ## Admin moderation
 
 Open `http://localhost:3003` (also available through the public UI's Admin link).
-Sign in with an existing JWT account with the `admin` role. The main gateway
+Enter an approved admin email first, then sign in with its password. A
+pre-approved local admin with no password gets a first-password creation form,
+matching Codyza Weather. No public admin registration or role selection is
+available. Admin sessions use an HttpOnly, SameSite cookie (Secure in production)
+until JWT expiry or sign-out and survive page reloads. Public user sessions remain
+in page memory. **First-password setup intentionally follows Weather's
+email-only flow: it does not verify email ownership. Provision passwordless admin
+accounts only when their intended owners are ready to activate them.**
+The main gateway
 and JWT service must be running; `AUTH_GATEWAY_URL` in
 `hackscout-gateway/.env` defaults to `http://127.0.0.1:4000`.
 
@@ -47,12 +62,17 @@ Apply [`20261106170000_event_suggestion_moderation.sql`](./supabase/migrations/2
 
 Search and paginate pending, approved, or rejected submissions. Supply the organizer, official website, format, start date, description, and location for non-virtual events before approving. Approval publishes a listing as **Needs Confirmation** with low evidence confidence; rejection requires a reason and does not publish. Both retain the reviewer, timestamp, and review note. Reviewed submissions are read-only.
 
-The dashboard also runs **scraper → MongoDB → ETL with AI → PostgreSQL**.
+The dashboard also runs **reset MongoDB and PostgreSQL → scraper → MongoDB → ETL with AI → PostgreSQL**.
 Enter an OpenAI-compatible key for each run; it is not saved. The UI shows
 stage and import counts, including partial failures. Configure
 `SCRAPER_SERVICE_URL` and `ETL_SERVICE_URL` on the main gateway and use the
-same MongoDB database/collection for both services. ETL remains insert-only.
-Animated stage cards display scraper/ETL elapsed times. Optional weekly,
+same MongoDB database/collection for both services. Every manual and automatic
+run permanently deletes scraper records, event listings and their dependent
+records before scraping. Accounts, suggestions/review history, categories and
+team members are retained; published suggestions are unlinked from deleted events.
+A failed reset stops the pipeline; later failures can leave databases empty or
+partially filled. The two database resets are not atomic together.
+ETL remains insert-only. Animated stage cards display reset/scraper/ETL elapsed times. Optional weekly,
 every-two-week, or monthly schedules use the backend's `AI_API_KEY` while it
 is running; form keys are not saved. See [local setup](./docs/LOCAL-RUN.md)
 for schedule timing and persistence.

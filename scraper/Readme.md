@@ -26,6 +26,12 @@ Set these variables in your local `.env` file before using the persistence route
 - `MONGODB_DATABASE_NAME` (defaults to `hackathon-opportunity-research`)
 - `MONGODB_COLLECTION_NAME` (defaults to `hackathons`)
 
+Failed MongoDB connections are closed and retried on the next request.
+For TLS handshake failures, check cluster availability, your current public
+IP in the Atlas network access list, and firewall/VPN TLS interception.
+Do not disable certificate validation. Verify connectivity with an authenticated
+`GET /hackathons/cache?limit=1` before retrying a destructive pipeline run.
+
 To enable the AI-backed pagination analyzer, also set:
 
 - `AI_API_KEY` - API key for an OpenAI-compatible provider

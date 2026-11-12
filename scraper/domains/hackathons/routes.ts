@@ -8,6 +8,7 @@ import {
 import { analyzePagination } from './pagination/analyzer';
 import { mapHackathon, persistHackathons, readCachedHackathons } from './service';
 import { parsePositiveInteger } from '../../shared/parsing';
+import { getHackathonsCollection } from '../../mongodb';
 
 // Route-level helpers keep HTTP-specific concerns close to the hackathon domain endpoints.
 const shouldPersist = (value: unknown): boolean => {
@@ -263,6 +264,21 @@ const fetchCachedHackathons = async (_request: Request, response: Response): Pro
 
 // The route registrar keeps all hackathon-specific HTTP endpoints grouped in one domain module.
 export const registerHackathonRoutes = (app: Express): void => {
+  app.post('/hackathons/reset', async (request, response) => {
+    if (request.get('x-user-id') || request.get('x-user-role')) {
+      response.status(403).json({ error: 'Database resets require an internal pipeline caller.' });
+      return;
+    }
+    try {
+      const collection = await getHackathonsCollection();
+      const result = await collection.deleteMany({});
+      console.warn('Pipeline cleared scraper records:', result.deletedCount);
+      response.json({ reset: true, deletedRecords: result.deletedCount });
+    } catch (error) {
+      console.error('Pipeline scraper reset failed:', error);
+      response.status(500).json({ error: 'Failed to reset scraper records.' });
+    }
+  });
   app.get('/hackathons', fetchHackathons);
   app.get('/hackathons/persist-all', persistAllHackathons);
   app.get('/hackathons/cache', fetchCachedHackathons);

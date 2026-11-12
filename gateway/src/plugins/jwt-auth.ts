@@ -6,6 +6,7 @@ import { env } from "../config/env.js";
 import { roleAllowsMethod } from "../lib/jwt.js";
 import { attachAuthUser } from "../lib/upstream-headers.js";
 import { verifyBearer, type BearerResult } from "../lib/verify-client.js";
+import { ADMIN_REQUEST_HEADER, adminCookieToken, adminSessionCookie } from "../lib/admin-session.js";
 
 const PROXIED_PREFIXES = [
   "/api/hackathons",
@@ -35,7 +36,9 @@ export function isPublicRoute(method: string, path: string): boolean {
   if ((method === "GET" || method === "HEAD") &&
       ["/api/hackscout/hackathons", "/api/hackscout/health"].includes(path)) return true;
   if (method === "POST" &&
-      ["/api/hackscout/suggestions", "/api/hackscout/admin/login"].includes(path)) return true;
+      ["/api/hackscout/suggestions", "/api/hackscout/admin/login",
+        "/api/hackscout/admin/auth/access", "/api/hackscout/admin/auth/login",
+        "/api/hackscout/admin/auth/create-password"].includes(path)) return true;
   return method === "POST" && (
     path === "/api/auth/login" || path === "/api/auth/register" || path === "/api/auth/invitations/accept"
   );
@@ -75,6 +78,20 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
     }
 
     const path = normalizePath(request.url);
+    if (path.startsWith("/api/hackscout/admin/")) {
+      reply.header("Cache-Control", "no-store");
+      const cookieToken = adminCookieToken(request.headers.cookie);
+      const cookieSession = !request.headers.authorization && cookieToken;
+      const authAction = path.startsWith("/api/hackscout/admin/auth/");
+      if (request.method !== "GET" && request.method !== "HEAD" &&
+          (cookieSession || authAction) && request.headers[ADMIN_REQUEST_HEADER] !== "1") {
+        return reply.code(403).send({ error: "A same-origin administrator request is required." });
+      }
+      if (cookieSession) request.headers.authorization = `Bearer ${cookieToken}`;
+    }
+    if (path === "/api/scraper/hackathons/reset") {
+      return reply.code(403).send({ error: "Database resets require the internal pipeline route." });
+    }
     if (path === "/api/hackscout" || path.startsWith("/api/hackscout/")) {
       if (!env.GATEWAY_INTERNAL_SECRET) {
         return reply.code(503).send({ error: "Gateway secret is not configured." });
@@ -87,6 +104,9 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
         Buffer.byteLength(supplied) === Buffer.byteLength(expected) &&
         timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
       const allowed = request.method === "GET" && path === "/api/internal/scraper/hackathons/persist-all"
+        || request.method === "POST" && [
+          "/api/internal/scraper/hackathons/reset", "/api/internal/hackathons/reset",
+        ].includes(path)
         || request.method === "POST" && path === "/api/internal/etl/etl/import/mongodb";
       if (!valid || request.headers["x-gateway-caller"] !== "team-2-gateway" || !allowed) {
         request.log.warn({ path, requestId: request.id }, "internal pipeline access denied");
@@ -115,6 +135,9 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
     }
 
     const result = await verifyBearer(request.headers.authorization);
+    if (path.startsWith("/api/hackscout/admin/") && result.status === "invalid") {
+      reply.header("Set-Cookie", adminSessionCookie("", 0, env.NODE_ENV === "production"));
+    }
     if (rejectBearer(result, reply) || result.status !== "ok") {
       return;
     }
@@ -123,7 +146,7 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
         result.user.role !== "admin") {
       return reply.code(403).send({ error: "An administrator role is required." });
     }
-    if (path === "/api/auth/logout") {
+    if (path === "/api/auth/logout" || path === "/api/auth/account" && request.method === "DELETE") {
       attachAuthUser(request, result.user);
       return;
     }

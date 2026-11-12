@@ -6,7 +6,7 @@ import { ZodError } from "zod";
 import { env } from "./config/env.js";
 import type { InvitationStore } from "./db/invitations.js";
 import { createMemoryTokenStore, type TokenStore } from "./db/token-store.js";
-import type { DirectoryAccountInput, DirectoryAccountResult, RegistrationStore, UserStore } from "./db/users.js";
+import type { AccountDeletionStore, AdminSetupStore, DirectoryAccountInput, DirectoryAccountResult, RegistrationStore, UserStore } from "./db/users.js";
 import { authorizeGatewayCaller } from "./lib/gateway-auth.js";
 import type { DirectoryAuthenticator } from "./lib/directory.js";
 import type { DirectoryGroupMapping } from "./lib/directory-role.js";
@@ -19,10 +19,14 @@ import { loginRoutes } from "./routes/login.js";
 import { logoutRoutes } from "./routes/logout.js";
 import { registrationRoutes } from "./routes/register.js";
 import { verifyRoutes } from "./routes/verify.js";
+import { adminAccessRoutes } from "./routes/admin-access.js";
+import { accountDeletionRoutes } from "./routes/account-deletion.js";
 
 export type BuildAppOptions = {
   userStore: UserStore;
   registrationStore?: RegistrationStore;
+  adminSetupStore?: AdminSetupStore;
+  accountDeletionStore?: AccountDeletionStore;
   invitationStore?: InvitationStore;
   tokenStore?: TokenStore;
   checkDatabase?: () => Promise<boolean>;
@@ -98,6 +102,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     registrationRoutes(options.registrationStore, tokenStore, options.bcryptRounds ?? env.BCRYPT_ROUNDS),
   );
   await app.register(logoutRoutes(options.userStore, tokenStore));
+  await app.register(adminAccessRoutes(options.userStore, options.adminSetupStore, tokenStore, options.bcryptRounds ?? env.BCRYPT_ROUNDS));
+  await app.register(accountDeletionRoutes(options.userStore, options.accountDeletionStore, tokenStore, options.directory));
   await app.register(
     invitationRoutes(options.invitationStore, tokenStore, options.bcryptRounds ?? env.BCRYPT_ROUNDS, sendMail),
   );

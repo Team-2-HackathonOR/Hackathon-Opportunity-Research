@@ -62,12 +62,12 @@ gateway. Configure `services/hackathon-service/.env` with its PostgreSQL
 the gateway's `HACKATHON_SERVICE_URL` defaults to
 `http://127.0.0.1:4001`.
 
-The standalone HackScout API still uses Supabase for suggestions and
-moderation. Copy `hackscout-gateway/.env.example` to
-`hackscout-gateway/.env`, set `SUPABASE_GRAPHQL_URL` and `SUPABASE_API_KEY`
-to a server-side Supabase secret/service-role key, and leave `PORT=3002`.
-Never use or expose a publishable key or commit the secret. These credentials
-are not used to load the public listings.
+Suggestions and moderation also use the Hackathon Service's PostgreSQL
+connection. They do not require Supabase API keys or exposed REST/GraphQL
+schemas. Apply the moderation migration below to that same database.
+The standalone HackScout backend still handles admin login and pipeline
+controls: configure its shared `GATEWAY_INTERNAL_SECRET`, leave `PORT=3002`,
+and set `AUTH_GATEWAY_URL` if the main gateway is not at `http://127.0.0.1:4000`.
 
 ## 5. Install dependencies (once)
 
@@ -133,12 +133,26 @@ topics and the general-event fallback have their own image.
 Open `http://localhost:3003` for the standalone admin UI, or
 `http://localhost:3001/hackscout-admin/` through the public client's gateway
 proxy. The public footer includes an Admin link.
-Sign in with an existing account whose JWT role is `admin`; viewer and
-researcher accounts cannot access the moderation API. Configure
+Enter an approved admin email, then sign in. Existing local admin accounts with
+`password_hash IS NULL` instead create their first password, with confirmation
+(minimum 8 characters, maximum 72 UTF-8 bytes). Directory accounts use directory
+credentials and never set a local password. Viewer, researcher and unknown
+emails cannot activate admin access; public registration is unchanged.
+To pre-approve a new administrator, a database operator can insert its
+lowercase email into `app_auth.app_users` with `role='admin'`,
+`auth_source='local'`, and `password_hash=NULL`. This changes no existing account
+roles or passwords. **As in Weather, email ownership is not verified during
+first-password setup. Anyone knowing an unactivated admin email can claim it;
+provision such accounts only immediately before the intended admin activates.**
+Configure
 `AUTH_GATEWAY_URL=http://127.0.0.1:4000` in `hackscout-gateway/.env` when the
 authentication gateway runs at a different address. Both the main gateway
 and JWT service must be available. No new admin password or separate login
-database is introduced.
+database is introduced. Admin sessions now use a host-only HttpOnly SameSite=Lax
+cookie scoped to `/api/hackscout/admin`; production requires HTTPS (Secure
+cookie). Sessions restore after reload and expire with the JWT. Browser admin
+mutations include `x-hackscout-admin: 1`; cross-origin browser clients are not
+supported. The frontend server proxy preserves this header and admin cookies.
 
 On the research Supabase project, apply these migrations in order:
 
@@ -147,11 +161,40 @@ On the research Supabase project, apply these migrations in order:
 3. [`20261106170000_event_suggestion_moderation.sql`](../supabase/migrations/20261106170000_event_suggestion_moderation.sql)
 
 The last migration creates or upgrades `public.event_suggestions`, preserving
-existing submissions. Keep `public` exposed to the Supabase REST API and
-`hackathon_research` exposed only if using the standalone GraphQL listing
-queries. The service-role key remains only on the standalone API server.
-Browser requests use the existing JWT;
-the API checks its current admin role for every moderation operation.
+existing submissions. The Hackathon Service reads the queue and calls the
+atomic moderation function directly through PostgreSQL. Its database role must
+have access to `public.event_suggestions` and permission to execute
+`public.moderate_event_suggestion`; the existing database owner connection
+already has these permissions. No Supabase API exposure is needed.
+Browser requests use the existing JWT; the gateway verifies the current admin
+role and the service requires trusted gateway headers for every review.
+
+### User data deletion
+
+The public page's **My data** button, also available before sign-in as
+**Manage my data**, provides separate confirmed actions:
+
+- **Clear browser data:** removes only `hackscout-saved` from local storage and
+  resets on-page filters. Unrelated browser storage and account sessions stay.
+- **Delete my account:** requires a signed-in session, the current password and
+  the exact confirmation `DELETE`. The gateway confirms the password, clears
+  linked research data, then deletes the auth account, all its token records and
+  invitations addressed to or issued by that account. Research cleanup deletes
+  matching-email team-member rows, their contributions and verifications;
+  other references become null. Reviews retain status/listings but lose reviewer
+  ID and review notes. Other users' data, public listings and anonymous
+  suggestions remain. Browser bookmarks are separate and are not cleared.
+
+Auth and research deletions each use a transaction, but are not atomic together.
+If cleanup fails, the account is kept. If final account deletion fails, some
+linked data may already be gone; retry while signed in. All old sessions fail
+verification after the account is removed. External LDAP accounts are not
+deleted from their directory and signing in there again can reprovision the
+local account. Seed-managed accounts cannot self-delete until an operator
+removes the corresponding `SEED_*_EMAIL`/`SEED_*_PASSWORD` settings and restarts
+the JWT service, preventing recreation on restart.
+This feature does not purge infrastructure logs or backups; those need their
+own operator retention policy.
 
 The queue supports status filters, event-name/website search, and 12 submissions
 per page. Before approval, supply event name, organizer, official HTTP(S)
@@ -163,14 +206,23 @@ transaction as **Needs Confirmation** with low confidence, not verified
 eligibility. Refresh public listings to see newly published events.
 
 Admins can run the complete pipeline from the admin dashboard. Enter an
-OpenAI-compatible API key for each run: the scraper first persists Devpost pages
+OpenAI-compatible API key for each run. **Every manual and scheduled run first
+permanently deletes the scraper's MongoDB collection contents, then PostgreSQL
+event listings and their dependent records.** Accounts, categories, team members
+and suggestions/review history are preserved. Published suggestions lose their
+link to deleted events; event-linked contributions are deleted. Identity
+sequences are not reset, so deleted event IDs are not reused.
+These resets are sequential, not cross-database atomic: if PostgreSQL reset
+fails, MongoDB may already be empty. Any reset failure stops before scraping.
+If scraping or importing fails afterward, listings can remain empty or partial.
+The scraper then persists Devpost pages
 to MongoDB, then ETL imports this scrape's records with AI normalization into
 PostgreSQL. The key is used only during that run, not saved, and immediately
 cleared from the form. Both services use their own `AI_BASE_URL` and `AI_MODEL`.
-Configure `HACKSCOUT_SERVICE_URL`, `SCRAPER_SERVICE_URL`, and `ETL_SERVICE_URL`
+Configure `HACKSCOUT_SERVICE_URL`, `HACKATHON_SERVICE_URL`, `SCRAPER_SERVICE_URL`, and `ETL_SERVICE_URL`
 in `gateway/.env` if they differ from ports 3002, 3000, and 8000 on localhost.
 Set the same `GATEWAY_INTERNAL_SECRET` in the gateway, HackScout API,
-scraper, and ETL environment files. Backend API requests without the gateway
+Hackathon Service, scraper, and ETL environment files. Backend API requests without the gateway
 caller and secret are rejected; do not put this secret in frontend code.
 Pipeline stages call internal gateway routes rather than the services directly.
 Both services must use the same MongoDB database and collection.
@@ -178,14 +230,15 @@ ETL must point to the research database used by public listings.
 
 Only one pipeline runs at a time per standalone API process. The dashboard
 polls its stage and result; closing the page does not cancel a run. Run status
-includes server-recorded start/end timestamps for scraper and ETL. Animated
+includes deletion counts and server-recorded start/end timestamps for reset, scraper and ETL. Animated
 stage cards show live elapsed time and freeze each duration when that stage
 finishes or fails. Waiting/skipped stages have no elapsed time. Reduced-motion
 preferences disable the activity animations; no percentage progress is inferred.
-Run status is in server memory and is lost on server restart. ETL is insert-only: existing
-events or normalization failures are reported as failures, while successful
-inserts remain saved. Review failures before repeating a run; reruns do not
-update existing research events.
+Run status is in server memory and is lost on server restart. ETL is insert-only:
+duplicates within a run or normalization failures are reported as failures,
+while successful inserts remain saved. Review failures before repeating a run;
+reruns delete previous listings rather than updating them. Run only one pipeline
+process, and do not run direct scrapes/imports concurrently with a reset.
 
 **Automatic runs:** choose Disabled, Once a week, Once every two weeks, or
 Once a month and save the schedule. Weekly schedules start on the next Sunday

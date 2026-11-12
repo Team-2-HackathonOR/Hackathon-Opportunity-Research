@@ -1,5 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
-let token = "";
+let authenticated = false;
+let loginStep = "email";
 let page = 1;
 let total = 0;
 let pageSize = 12;
@@ -34,7 +35,7 @@ function notify(message, error = false) {
 }
 
 function signOut() {
-  token = "";
+  authenticated = false;
   queueController?.abort();
   clearTimeout(searchTimer);
   clearTimeout(pipelineTimer);
@@ -53,14 +54,16 @@ function signOut() {
   $("#password").value = "";
   $("#scraper-api-key").value = "";
   $("#scraper-result").textContent = "";
+  setLoginStep("email");
 }
 
 async function api(route, { method = "GET", body, signal } = {}) {
   const response = await fetch(`/api/hackscout/admin/${route}`, {
     method,
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "x-hackscout-admin": "1",
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
     ...(signal ? { signal } : {}),
@@ -77,7 +80,7 @@ async function api(route, { method = "GET", body, signal } = {}) {
     throw error;
   }
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) signOut();
+    if (authenticated && (response.status === 401 || response.status === 403)) signOut();
     throw new Error(payload.error || `Admin API returned HTTP ${response.status}.`);
   }
   return payload;
@@ -209,37 +212,82 @@ async function review(decision) {
   }
 }
 
+function setLoginStep(step) {
+  loginStep = step;
+  const setup = step === "setup";
+  $("#email").readOnly = step !== "email";
+  $("#password-field").hidden = step === "email";
+  $("#password").disabled = step === "email";
+  $("#password").value = "";
+  $("#password").minLength = setup ? 8 : 1;
+  $("#password").autocomplete = setup ? "new-password" : "current-password";
+  $("#confirm-password-field").hidden = !setup;
+  $("#confirm-password").disabled = !setup;
+  $("#confirm-password").value = "";
+  $("#change-email").hidden = step === "email";
+  $("#login-submit").textContent = setup ? "Create password" : step === "password" ? "Sign in" : "Continue";
+  $("#login-description").textContent = setup
+    ? "Your administrator account is approved. Create your first password."
+    : step === "password" ? "Sign in with your administrator password."
+      : "Enter your approved administrator email to continue.";
+}
+
+async function openDashboard(session) {
+  if (session.user?.role !== "admin") throw new Error("An administrator account is required.");
+  authenticated = true;
+  $("#password").value = "";
+  $("#confirm-password").value = "";
+  $("#account-email").textContent = session.user.email;
+  $("#login-panel").hidden = true;
+  $("#dashboard").hidden = false;
+  $("#logout").hidden = false;
+  page = 1;
+  notify("Signed in. Select a submission to review.");
+  await loadPipeline();
+  await loadQueue();
+}
+
+$("#change-email").addEventListener("click", () => {
+  setLoginStep("email");
+  notify("");
+  $("#email").focus();
+});
 $("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("#login-submit").disabled = true;
-  notify("Signing in...");
+  $("#change-email").disabled = true;
+  notify(loginStep === "email" ? "Checking account..." : loginStep === "setup" ? "Creating password..." : "Signing in...");
   try {
-    const session = await api("login", {
+    if (loginStep === "email") {
+      const access = await api("auth/access", { method: "POST", body: { email: $("#email").value.trim() } });
+      if (typeof access.email !== "string" || typeof access.passwordSetupRequired !== "boolean") {
+        throw new Error("The administrator access response is invalid.");
+      }
+      $("#email").value = access.email;
+      setLoginStep(access.passwordSetupRequired ? "setup" : "password");
+      $("#password").focus();
+      notify("");
+      return;
+    }
+    if (loginStep === "setup" && $("#password").value !== $("#confirm-password").value) {
+      throw new Error("Passwords do not match.");
+    }
+    const session = await api(loginStep === "setup" ? "auth/create-password" : "auth/login", {
       method: "POST", body: { email: $("#email").value.trim(), password: $("#password").value },
     });
-    if (!session.token || session.user?.role !== "admin") throw new Error("An administrator account is required.");
-    token = session.token;
-    $("#password").value = "";
-    $("#account-email").textContent = session.user.email;
-    $("#login-panel").hidden = true;
-    $("#dashboard").hidden = false;
-    $("#logout").hidden = false;
-    page = 1;
-    notify("Signed in. Select a submission to review.");
-    await loadPipeline();
-    await loadPipelineSchedule();
-    await loadQueue();
+    await openDashboard(session);
   } catch (error) {
     console.error("Admin sign-in failed:", error);
     notify(error.message, true);
   } finally {
     $("#login-submit").disabled = false;
+    $("#change-email").disabled = false;
   }
 });
 $("#logout").addEventListener("click", async () => {
   $("#logout").disabled = true;
   try {
-    await api("logout", { method: "POST", body: {} });
+    await api("auth/logout", { method: "POST", body: {} });
     notify("Signed out.");
   } catch (error) {
     console.error("Could not revoke admin session:", error);
@@ -261,7 +309,7 @@ function pipelineElapsed(startedAt, finishedAt) {
 
 function updatePipelineClock() {
   if (!pipelineJob) return;
-  for (const stage of ["scraper", "etl"]) {
+  for (const stage of ["reset", "scraper", "etl"]) {
     const step = pipelineJob.steps?.[stage];
     $(`#pipeline-time-${stage}`).textContent = step?.startedAt
       ? pipelineElapsed(step.startedAt, step.finishedAt) : "--:--";
@@ -280,11 +328,11 @@ function showPipeline(job) {
     $("#scraper-result").textContent = "";
     return;
   }
-  for (const stage of ["scraper", "etl"]) {
+  for (const stage of ["reset", "scraper", "etl"]) {
     const status = job.steps?.[stage]?.status || "waiting";
     $(`#pipeline-step-${stage}`).dataset.status = status;
     $(`#pipeline-step-${stage} .pipeline-marker`).textContent = status === "completed" ? "OK"
-      : status === "failed" ? "!" : stage === "scraper" ? "1" : "2";
+      : status === "failed" ? "!" : stage === "reset" ? "1" : stage === "scraper" ? "2" : "3";
     $(`#pipeline-status-${stage}`).textContent = {
       running: "Running", completed: "Completed", failed: "Failed", skipped: "Skipped", waiting: "Waiting",
     }[status] || "Waiting";
@@ -295,24 +343,27 @@ function showPipeline(job) {
     ? `Scraper: ${job.scraper.pagesPersisted} pages, ${job.scraper.uniqueHackathonsPersisted} unique records. ` : "";
   const etl = job.etl
     ? `ETL: ${job.etl.processed} processed, ${job.etl.inserted} inserted, ${job.etl.failed} failed. ` : "";
+  const reset = Object.entries(job.reset || {})
+    .map(([database, count]) => `${database}: ${count} deleted`).join(", ");
+  const resetSummary = reset ? `Reset ${reset}. ` : "";
   $("#scraper-result").textContent = scraping
-    ? `${scrape}Running ${job.stage}. You can leave this page; the server continues the run.`
-    : `${scrape}${etl}${job.status === "completed" ? "Pipeline completed." : `Pipeline failed at ${job.stage}: ${job.error}`}`;
+    ? `${resetSummary}${scrape}Running ${job.stage}. You can leave this page; the server continues the run.`
+    : `${resetSummary}${scrape}${etl}${job.status === "completed" ? "Pipeline completed." : `Pipeline failed at ${job.stage}: ${job.error}`}`;
 }
 
 async function loadPipeline() {
   clearTimeout(pipelineTimer);
   try {
     const result = await api("pipeline");
-    if (!token) return;
+    if (!authenticated) return;
     showPipeline(result.job);
     await loadPipelineSchedule(false);
-    if (token) pipelineTimer = setTimeout(loadPipeline, scraping ? 3000 : 10000);
+    if (authenticated) pipelineTimer = setTimeout(loadPipeline, scraping ? 3000 : 10000);
   } catch (error) {
     console.error("Could not load pipeline status:", error);
     $("#scraper-result").classList.add("error");
     $("#scraper-result").textContent = `Could not check pipeline status: ${error.message}`;
-    if (token) pipelineTimer = setTimeout(loadPipeline, 5000);
+    if (authenticated) pipelineTimer = setTimeout(loadPipeline, 5000);
   }
 }
 
@@ -330,7 +381,7 @@ function showPipelineSchedule(schedule, updateSelection = true) {
 async function loadPipelineSchedule(updateSelection = true) {
   try {
     const result = await api("pipeline/schedule");
-    if (token) showPipelineSchedule(result.schedule, updateSelection);
+    if (authenticated) showPipelineSchedule(result.schedule, updateSelection);
   } catch (error) {
     console.error("Could not load pipeline schedule:", error);
     $("#pipeline-schedule-status").classList.add("error");
@@ -345,7 +396,7 @@ $("#pipeline-schedule-form").addEventListener("submit", async (event) => {
     const result = await api("pipeline/schedule", {
       method: "POST", body: { frequency: $("#pipeline-frequency").value },
     });
-    if (token) showPipelineSchedule(result.schedule);
+    if (authenticated) showPipelineSchedule(result.schedule);
   } catch (error) {
     console.error("Could not save pipeline schedule:", error);
     $("#pipeline-schedule-status").classList.add("error");
@@ -373,9 +424,9 @@ $("#scraper-form").addEventListener("submit", async (event) => {
     });
     $("#scraper-api-key").value = "";
     const result = await request;
-    if (!token) return;
+    if (!authenticated) return;
     showPipeline(result.job);
-    if (scraping && token) pipelineTimer = setTimeout(loadPipeline, 3000);
+    if (scraping && authenticated) pipelineTimer = setTimeout(loadPipeline, 3000);
   } catch (error) {
     console.error("Could not start pipeline:", error);
     $("#scraper-result").classList.add("error");
@@ -402,3 +453,19 @@ $("#next").addEventListener("click", () => { page += 1; closeReview(); loadQueue
 $("#close-review").addEventListener("click", closeReview);
 $("#review-form").addEventListener("submit", (event) => { event.preventDefault(); review("approved"); });
 $("#reject").addEventListener("click", () => review("rejected"));
+
+async function restoreAdminSession() {
+  $("#login-submit").disabled = true;
+  try {
+    const response = await fetch("/api/hackscout/admin/auth/session", { credentials: "same-origin" });
+    if (response.status === 401 || response.status === 403) return;
+    if (!response.ok) throw new Error(`Could not restore administrator session (HTTP ${response.status}).`);
+    await openDashboard(await response.json());
+  } catch (error) {
+    console.error("Could not restore administrator session:", error);
+    notify(error.message, true);
+  } finally {
+    $("#login-submit").disabled = false;
+  }
+}
+void restoreAdminSession();

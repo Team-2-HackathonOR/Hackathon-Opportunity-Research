@@ -11,6 +11,9 @@ import { exportRoutes } from "./routes/exports.js";
 import { hackathonRoutes } from "./routes/hackathons.js";
 import { healthRoutes } from "./routes/health.js";
 import { organizerFollowupRoutes } from "./routes/organizer-followups.js";
+import { suggestionRoutes } from "./routes/suggestions.js";
+import { pipelineResetRoutes } from "./routes/pipeline-reset.js";
+import { accountDataRoutes } from "./routes/account-data.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -55,6 +58,10 @@ export async function buildApp(): Promise<FastifyInstance> {
     request.log.error({ err: error, requestId: request.id }, "unhandled error");
     reply.code(500).send({ error: "Internal server error." });
   });
+
+  await app.register(suggestionRoutes);
+  await app.register(pipelineResetRoutes);
+  await app.register(accountDataRoutes);
 
   return app;
 }

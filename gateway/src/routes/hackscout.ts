@@ -21,10 +21,31 @@ export const hackscoutRoutes: FastifyPluginAsync = async (app) => {
   };
   await app.register(proxy, {
     upstream: env.HACKATHON_SERVICE_URL,
+    prefix: "/api/internal/hackathons/reset",
+    rewritePrefix: "/api/internal/pipeline/reset",
+    httpMethods: ["POST"],
+    replyOptions,
+  });
+  await app.register(proxy, {
+    upstream: env.HACKATHON_SERVICE_URL,
     prefix: "/api/hackscout/hackathons",
     rewritePrefix: "/api/hackathons",
     httpMethods: ["GET", "HEAD"],
     replyOptions: publicListingsReplyOptions,
+  });
+  await app.register(proxy, {
+    upstream: env.HACKATHON_SERVICE_URL,
+    prefix: "/api/hackscout/suggestions",
+    rewritePrefix: "/api/suggestions",
+    httpMethods: ["POST"],
+    replyOptions: publicListingsReplyOptions,
+  });
+  await app.register(proxy, {
+    upstream: env.HACKATHON_SERVICE_URL,
+    prefix: "/api/hackscout/admin/suggestions",
+    rewritePrefix: "/api/admin/suggestions",
+    httpMethods: ["GET", "HEAD", "POST"],
+    replyOptions,
   });
   await app.register(proxy, {
     upstream: env.HACKSCOUT_SERVICE_URL,
@@ -50,7 +71,7 @@ export const hackscoutRoutes: FastifyPluginAsync = async (app) => {
     upstream: env.SCRAPER_SERVICE_URL ?? "http://127.0.0.1:3000",
     prefix: "/api/internal/scraper",
     rewritePrefix: "",
-    httpMethods: ["GET"],
+    httpMethods: ["GET", "POST"],
     replyOptions: { ...replyOptions, timeout: 24 * 60 * 60 * 1000 },
   });
   await app.register(proxy, {

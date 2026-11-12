@@ -10,7 +10,8 @@ function createAuthRouter() {
   router.use(async (request, response) => {
     const route = request.path;
     const allowed = request.method === "POST" && ["/login", "/register", "/logout"].includes(route)
-      || request.method === "GET" && route === "/me";
+      || request.method === "GET" && route === "/me"
+      || request.method === "DELETE" && route === "/account";
     if (!allowed) return response.status(404).json({ error: "Unknown authentication route." });
     const target = new URL(`/api/auth${route}`, process.env.AUTH_GATEWAY_URL || "http://127.0.0.1:4000");
     let upstream;
@@ -21,7 +22,7 @@ function createAuthRouter() {
           "Content-Type": "application/json",
           ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}),
         },
-        ...(request.method === "POST" ? { body: JSON.stringify(request.body ?? {}) } : {}),
+        ...(["POST", "DELETE"].includes(request.method) ? { body: JSON.stringify(request.body ?? {}) } : {}),
         signal: AbortSignal.timeout(15000),
       });
     } catch {

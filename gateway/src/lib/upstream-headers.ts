@@ -43,6 +43,7 @@ export function rewriteUpstreamHeaders(
   secret: string | undefined,
 ): IncomingHttpHeaders {
   const next: IncomingHttpHeaders = { ...headers };
+  delete next.cookie;
   for (const name of IDENTITY_HEADERS) {
     delete next[name];
   }
