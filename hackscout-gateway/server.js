@@ -4,10 +4,13 @@ const express = require("express");
 const path = require("node:path");
 const { createAdminRouter } = require("./admin");
 const { createAuthRouter } = require("./auth");
+const { createFrontendProxy } = require("./frontend-proxy");
 const { requireGateway } = require("./gateway-auth");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+app.use("/api/hackscout", createFrontendProxy());
+app.use("/api/auth", createAuthRouter());
 app.use("/api", requireGateway);
 
 const eventsQuery = `
@@ -321,10 +324,10 @@ app.post("/api/suggestions", express.json({ limit: "10kb" }), async (request, re
   }
 });
 
-app.use("/api/auth", createAuthRouter());
 const adminRouter = createAdminRouter(getSupabaseConfig);
 app.use("/api/admin", adminRouter);
 app.use("/admin", express.static(path.join(__dirname, "..", "admin-ui")));
+app.use("/hackscout-admin", express.static(path.join(__dirname, "..", "admin-ui")));
 app.use(express.static(path.join(__dirname, "..", "hackscout-ui")));
 
 app.use((error, _request, response, _next) => {

@@ -24,6 +24,18 @@ and moderation use the protected HackScout API on port 3002.
 
 See [local setup](./docs/LOCAL-RUN.md) for the database migrations and the full service launcher, which serves the public UI on `http://localhost:3001`.
 
+### Deployed HackScout frontend
+
+When deploying `hackscout-gateway/server.js` as the frontend on Vercel, set
+`AUTH_GATEWAY_URL` to the deployed **main gateway** URL, not the HackScout
+frontend URL or the Hackathon Service URL. Browser `/api/hackscout/*` and
+`/api/auth/*` requests are forwarded server-side to that gateway. Gateway
+credentials and identity headers are never accepted from the browser proxy.
+The main gateway must have `HACKATHON_SERVICE_URL` pointing to the deployed
+Hackathon Service and `HACKSCOUT_SERVICE_URL` pointing back to this backend.
+The backend's `/api/admin`, `/api/suggestions`, and legacy listing routes
+remain gateway-only; `/hackscout-admin/` serves the admin UI.
+
 ## Admin moderation
 
 Open `http://localhost:3003` (also available through the public UI's Admin link).
