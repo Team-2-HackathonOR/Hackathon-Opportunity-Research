@@ -70,6 +70,10 @@ Pipeline requests also verify the administrator through `/api/auth/me`.
 If that check is rejected, the backend reports the upstream HTTP status and
 route and logs the gateway origin without logging credentials. Inspect the
 HackScout backend deployment logs alongside the main gateway logs.
+The main gateway logs failed JWT verification with the upstream origin, path,
+HTTP status (when available), and a failure reason, without credentials or
+response bodies. Verification has a 10-second timeout and does not follow
+redirects.
 
 Apply [`20261106170000_event_suggestion_moderation.sql`](./supabase/migrations/20261106170000_event_suggestion_moderation.sql) after the research schema and listing-access migrations. It creates or upgrades the suggestions table, adds review history, and enables atomic publication.
 

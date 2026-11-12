@@ -9,7 +9,10 @@ export type BearerResult =
   | { status: "unreachable" }
   | { status: "ok"; user: AuthUser };
 
-export async function verifyBearer(authorization: string | undefined): Promise<BearerResult> {
+export async function verifyBearer(
+  authorization: string | undefined,
+  logger?: Pick<FastifyBaseLogger, "error">,
+): Promise<BearerResult> {
   if (!authorization) {
     return { status: "anonymous" };
   }
@@ -21,17 +24,26 @@ export async function verifyBearer(authorization: string | undefined): Promise<B
   }
 
   const base = env.JWT_SERVICE_URL.endsWith("/") ? env.JWT_SERVICE_URL : `${env.JWT_SERVICE_URL}/`;
+  const target = new URL("verify", base);
+  const reportFailure = (reason: string, upstreamStatus?: number) => {
+    logger?.error({
+      upstreamOrigin: target.origin, upstreamPath: target.pathname, reason, upstreamStatus,
+    }, "JWT session verification failed.");
+  };
   let response: Response;
   try {
-    response = await fetch(new URL("verify", base), {
+    response = await fetch(target, {
       method: "POST",
       headers: {
         authorization,
         [GATEWAY_CALLER_HEADER]: GATEWAY_CALLER,
         [GATEWAY_SECRET_HEADER]: env.GATEWAY_INTERNAL_SECRET,
       },
+      signal: AbortSignal.timeout(10000),
+      redirect: "manual",
     });
   } catch {
+    reportFailure("network_error_or_timeout");
     return { status: "unreachable" };
   }
 
@@ -39,16 +51,20 @@ export async function verifyBearer(authorization: string | undefined): Promise<B
     return { status: "invalid" };
   }
   if (!response.ok) {
+    reportFailure("upstream_http_error", response.status);
     return { status: "unreachable" };
   }
 
   try {
     const user = readVerifiedUser(await response.json());
     if (!user) {
+      reportFailure("invalid_session_payload", response.status);
       return { status: "unreachable" };
     }
     return { status: "ok", user };
   } catch {
+    reportFailure("invalid_json_or_response_read_failure", response.status);
     return { status: "unreachable" };
   }
 }
+import type { FastifyBaseLogger } from "fastify";

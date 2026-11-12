@@ -51,7 +51,7 @@ export const adminSessionRoutes: FastifyPluginAsync = async (app) => {
         const session = sessionResult.safeParse(payload);
         if (!session.success) throw new Error("Invalid administrator session response.");
         const authorization = `Bearer ${session.data.token}`;
-        const verified = await verifyBearer(authorization);
+        const verified = await verifyBearer(authorization, request.log);
         if (verified.status !== "ok" || verified.user.role !== "admin") {
           await authRequest("/logout", {}, authorization);
           return reply.code(verified.status === "ok" ? 403 : 502).send({
