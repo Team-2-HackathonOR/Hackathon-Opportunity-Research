@@ -8,9 +8,6 @@
 @media(max-width:900px){.filter-panel.open{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:650px){.filter-panel.open{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 8px}.filter-panel-footer{align-items:flex-start}.filter-panel-footer>span{line-height:1.5}}
 #event-grid[hidden],#pagination[hidden]{display:none}
-#app[hidden]{display:none}
-#auth-check{padding:24px;color:#17233c;font:500 15px "DM Sans",sans-serif}
-#account-logout[hidden]{display:none}
 .pagination{display:flex;justify-content:center;align-items:center;gap:12px;flex-wrap:wrap;margin:24px 0;color:#545b6d;font-size:12px}
 .pagination button,.pagination select{padding:8px 12px;border:1px solid #e2e5eb;border-radius:4px;background:white;color:#7259dc;font:inherit}
 .pagination button:not(:disabled),.pagination select{cursor:pointer}
@@ -82,3 +79,24 @@
 .modal-actions .modal-apply[href]:hover{background:#ccef50;box-shadow:0 5px 14px #17233c29;transform:translateY(-1px)}
 .modal-actions .modal-apply[href]:focus-visible{outline:3px solid #7659e8;outline-offset:3px}
 .modal-actions .modal-apply:disabled{border-color:#ececf1;background:#ececf1;color:#8c91a0;box-shadow:none}
+.account-entrance{min-height:100vh;display:grid;place-items:center;background:#17233c;padding:32px 20px}
+.account-card{background:white;border-radius:16px;padding:36px;width:min(100%,500px);box-shadow:0 20px 60px #0003}
+.account-card>.brand{margin-bottom:28px}
+.account-card h1{font:800 30px/1.2 Manrope,sans-serif;letter-spacing:-1px}
+.account-card p{color:#616879;line-height:1.6}
+.account-card .eyebrow{color:#7659e8}
+.account-tabs{display:flex;gap:8px;margin:24px 0}
+.account-tabs button,.account-guest{border:1px solid #e6e8ee;background:white;color:#41495a;border-radius:6px;padding:12px;font:600 14px "DM Sans",sans-serif;cursor:pointer}
+.account-tabs button[aria-pressed="true"]{background:#f4f1ff;border-color:#c9bff8;color:#6550c7}
+#account-form{display:grid;gap:16px}
+#account-form label{display:grid;gap:8px;color:#41495a;font-size:14px}
+#account-form input{width:100%;padding:12px;border:1px solid #d7dce5;border-radius:6px;font:inherit}
+.account-primary{background:#d9f16b;border:0;border-radius:6px;padding:14px;font:700 14px "DM Sans",sans-serif;cursor:pointer}
+.account-guest{width:100%;margin-top:16px}
+.account-card .account-hint{font-size:12px;margin:0}
+.account-card>.account-hint{margin-top:20px}
+#account-feedback{margin:0;color:#992b3f;font-size:14px;overflow-wrap:anywhere}
+.account-menu{background:white;cursor:pointer;max-width:230px;overflow:hidden;text-overflow:ellipsis}
+.account-card button:disabled{opacity:.6;cursor:wait}
+.account-card :focus-visible{outline:3px solid #7659e8;outline-offset:3px}
+[hidden]{display:none!important}

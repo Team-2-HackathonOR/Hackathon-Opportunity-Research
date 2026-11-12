@@ -22,6 +22,10 @@ export type UserStore = {
   findById(id: string): Promise<AppUser | null>;
 };
 
+export type RegistrationStore = {
+  createViewer(email: string, passwordHash: string): Promise<AppUser | null>;
+};
+
 export type DirectoryAccountInput = {
   email: string;
   role: Role;
@@ -60,7 +64,7 @@ const userColumns = "id, email, password_hash, role, auth_source, ldap_dn";
 
 export function createPgUserDirectory(
   source: Pick<JwtEnv, "AUTH_DATABASE_URL" | "DATABASE_URL" | "DATABASE_SSL">,
-): UserDirectory & InvitationStore {
+): UserDirectory & InvitationStore & RegistrationStore {
   const pool = new pg.Pool({
     connectionString: authDatabaseUrl(source),
     max: 5,
@@ -106,6 +110,19 @@ export function createPgUserDirectory(
     ...invitations,
     tokens,
     findByEmail,
+    async createViewer(email, passwordHash) {
+      const result = await pool.query<UserRow>(
+        `insert into app_auth.app_users (email, password_hash, role, auth_source)
+         values ($1, $2, 'viewer', 'local')
+         on conflict (email) do nothing
+         returning ${userColumns}`,
+        [email, passwordHash],
+      );
+      if (!result.rows.length) return null;
+      const user = mapUser(result.rows[0]);
+      if (!user) throw new Error("Account creation returned an unusable row.");
+      return user;
+    },
     async findById(id: string) {
       const result = await pool.query<UserRow>(
         `select ${userColumns} from app_auth.app_users where id = $1`,

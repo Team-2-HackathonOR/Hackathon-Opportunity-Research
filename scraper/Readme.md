@@ -1,5 +1,11 @@
 # Devpost hackathon scraper
 
+Scraper API operations under `/hackathons` require the main gateway's
+`x-gateway-caller` and `x-gateway-secret` headers. Set
+`GATEWAY_INTERNAL_SECRET` to the same server-side value used by the gateway.
+Pipeline calls go through the gateway's internal scraper route; direct
+unauthorized API requests are rejected. Root discovery and health remain public.
+
 This service exposes an Express endpoint that scrapes hackathon data from `https://devpost.com/api/hackathons` and returns a cleaner JSON response.
 
 MongoDB is wired so the scraper can persist normalized hackathons to a `hackathons` collection.

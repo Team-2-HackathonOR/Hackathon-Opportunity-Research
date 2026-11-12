@@ -25,6 +25,15 @@
 ## Gateway (`gateway/`)
 
 - Single public URL for the team
+- HackScout and admin static servers forward every API request to port 4000.
+  Guest listings and suggestions use `/api/hackscout/*`; admin APIs require
+  an admin JWT except for login. The gateway proxies these to the protected
+  HackScout backend on port 3002.
+- Pipeline orchestration calls the gateway's restricted internal scraper and
+  ETL routes. The gateway forwards the caller/secret to each service; direct
+  backend API calls without those credentials are rejected.
+- IP rate limits use per-process in-memory counters, not a shared store:
+  300 requests per minute by default, 30 for authentication routes.
 - Proxies paths to internal services
 - No database URL and no JWT signing secret. Login, signing, and token checks stay in `jwt-service`.
 - Asks `jwt-service` `POST /verify` on protected routes, then enforces `viewer`, `researcher`, and `admin` before proxying `/api/*`

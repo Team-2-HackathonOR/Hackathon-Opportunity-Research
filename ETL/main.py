@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
+from hmac import compare_digest
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
+from starlette.responses import JSONResponse
 from pydantic import ValidationError
 from pymongo.errors import PyMongoError
 from sqlalchemy.exc import IntegrityError
@@ -35,6 +38,22 @@ app = FastAPI(
 
 settings = get_settings()
 etl_service = EtlService(settings)
+
+
+@app.middleware("http")
+async def require_gateway(request: Request, call_next):
+    if request.url.path.startswith(("/etl/", "/events", "/team-members")):
+        expected = settings.gateway_internal_secret
+        if not expected:
+            logging.getLogger(__name__).error("ETL gateway authorization is not configured.")
+            return JSONResponse(status_code=503, content={"detail": "Gateway authorization is not configured."})
+        supplied = request.headers.get("x-gateway-secret", "")
+        if request.headers.get("x-gateway-caller") != "team-2-gateway" or not compare_digest(
+            supplied.encode("utf-8"), expected.encode("utf-8")
+        ):
+            logging.getLogger(__name__).warning("Direct ETL API access denied.")
+            return JSONResponse(status_code=403, content={"detail": "Use the main gateway to access ETL."})
+    return await call_next(request)
 
 
 @app.get("/", response_model=ApiMessage)
@@ -82,21 +101,38 @@ def create_event(payload: EventCreate, db: Session = Depends(get_db)) -> EventRe
 
 
 @app.post("/etl/import/mongodb", response_model=ImportResult)
-def import_from_mongodb(payload: MongoImportRequest) -> ImportResult:
+def import_from_mongodb(
+    payload: MongoImportRequest,
+    ai_api_key: Annotated[str | None, Header(alias="x-ai-api-key", max_length=4096)] = None,
+) -> ImportResult:
+    if payload.limit is None and not payload.fetched_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An unlimited import requires a scraper fetched_at timestamp.",
+        )
+    run_settings = settings.model_copy(update={"ai_api_key": ai_api_key.strip()}) if ai_api_key else settings
     try:
         records = fetch_mongo_records(
-            settings=settings,
+            settings=run_settings,
             limit=payload.limit,
             database_name=payload.database_name,
             collection_name=payload.collection_name,
+            fetched_at=payload.fetched_at,
         )
-        return etl_service.import_records(
+        result = EtlService(run_settings).import_records(
             records=records,
             source_name="mongodb",
             use_ai_normalization=payload.use_ai_normalization,
             primary_researcher_id=payload.primary_researcher_id,
             verifier_id=payload.verifier_id,
         )
+        if result.failed_count:
+            logging.getLogger(__name__).warning(
+                "MongoDB ETL import had %s failed records out of %s processed.",
+                result.failed_count,
+                result.processed_count,
+            )
+        return result
     except ConfigurationError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except NormalizationError as exc:

@@ -25,6 +25,7 @@ describe("gateway routes", () => {
       role: "api-gateway",
       routes: [
         { path: "POST /api/auth/login", upstream: "http://127.0.0.1:4004", access: "public" },
+        { path: "POST /api/auth/register", upstream: "http://127.0.0.1:4004", access: "public" },
         { path: "POST /api/auth/invitations", upstream: "http://127.0.0.1:4004", access: "admin" },
         { path: "POST /api/auth/invitations/accept", upstream: "http://127.0.0.1:4004", access: "public" },
         { path: "POST /api/auth/logout", upstream: "http://127.0.0.1:4004", access: "authenticated" },
@@ -35,6 +36,12 @@ describe("gateway routes", () => {
         { path: "/api/exports/*", upstream: "http://127.0.0.1:4001", access: "authenticated" },
         { path: "/api/ai/*", upstream: "not configured", access: "authenticated" },
         { path: "/api/scraper/*", upstream: "not configured", access: "authenticated" },
+        { path: "/api/hackscout/hackathons", upstream: "http://127.0.0.1:3002", access: "public" },
+        { path: "POST /api/hackscout/suggestions", upstream: "http://127.0.0.1:3002", access: "public" },
+        { path: "/api/hackscout/admin/*", upstream: "http://127.0.0.1:3002", access: "admin (login public)" },
+        { path: "/api/etl/*", upstream: "http://127.0.0.1:8000", access: "admin" },
+        { path: "/api/internal/scraper/hackathons/persist-all", upstream: "http://127.0.0.1:3000", access: "internal pipeline" },
+        { path: "/api/internal/etl/etl/import/mongodb", upstream: "http://127.0.0.1:8000", access: "internal pipeline" },
         { path: "/proxy/graphql", upstream: "not configured", access: "public" },
       ],
     });

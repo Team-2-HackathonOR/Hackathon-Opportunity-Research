@@ -348,14 +348,7 @@ function clearFilters() {
 }
 async function loadHackathons() {
   try {
-    const response = await fetch("/api/hackathons", {
-      headers: { Authorization: `Bearer ${sessionStorage.getItem("hackscout.jwt")}` },
-    });
-    if (response.status === 401) {
-      sessionStorage.removeItem("hackscout.jwt");
-      window.location.replace("/login/");
-      return;
-    }
+    const response = await fetch("/api/hackscout/hackathons");
     if (!response.ok) throw new Error(`Listings API returned HTTP ${response.status}`);
     const rows = await response.json();
     if (!Array.isArray(rows)) throw new Error("Listings API response was not a list");
@@ -530,19 +523,14 @@ $("#suggest-event").addEventListener("click", () => {
     submitButton.disabled = true;
     feedback.textContent = "Sending your suggestion…";
     try {
-      const response = await fetch("/api/suggestions", {
+      const response = await fetch("/api/hackscout/suggestions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionStorage.getItem("hackscout.jwt")}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           event: formData.get("event"),
           website: formData.get("website")
         })
       });
-      if (response.status === 401) {
-        sessionStorage.removeItem("hackscout.jwt");
-        window.location.replace("/login/");
-        return;
-      }
       if (!response.ok) throw new Error(`Suggestion API returned HTTP ${response.status}`);
       feedback.textContent = "Thanks! Your suggestion has been sent for review.";
       form.reset();

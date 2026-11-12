@@ -23,13 +23,45 @@
           <label>Password<input id="password" type="password" autocomplete="current-password" required maxlength="1024" /></label>
           <button class="primary" id="login-submit" type="submit">Sign in</button>
         </form>
-        <p class="hint">Only the admin role can access moderation. The session token is saved in this browser tab until sign-out or tab close.</p>
+        <p class="hint">Only the admin role can access moderation. Credentials and tokens are not saved in this browser.</p>
       </section>
       <section id="dashboard" hidden>
         <div class="heading">
           <div><p class="eyebrow">COMMUNITY SUBMISSIONS</p><h1>Moderation queue</h1><p>Review organizer websites and event details before publishing.</p></div>
           <button id="refresh" class="secondary">Refresh queue</button>
         </div>
+        <section class="panel scraper-panel" aria-labelledby="scraper-title">
+          <p class="eyebrow">DATA COLLECTION</p>
+          <h2 id="scraper-title">Run the full data pipeline</h2>
+          <p>Scrape Devpost into MongoDB, then run ETL with AI normalization into the research database. The API key is used only for this run and is not saved. Imports are insert-only; existing events may produce duplicate failures.</p>
+          <form id="scraper-form">
+            <label>AI API key<input id="scraper-api-key" type="password" autocomplete="off" spellcheck="false" required maxlength="4096" /></label>
+            <div class="review-actions"><button id="scraper-run" class="primary" type="submit">Run scraper and ETL</button></div>
+          </form>
+          <section id="pipeline-progress" class="pipeline-progress" aria-label="Pipeline progress" hidden>
+            <ol class="pipeline-steps">
+              <li id="pipeline-step-scraper" class="pipeline-step" data-status="waiting">
+                <span class="pipeline-marker" aria-hidden="true">1</span>
+                <div class="pipeline-step-copy"><strong>Scraper</strong><span>Devpost to MongoDB</span><span id="pipeline-status-scraper">Waiting</span></div>
+                <span id="pipeline-time-scraper" class="pipeline-time" aria-label="Scraper elapsed time">00:00</span>
+              </li>
+              <li id="pipeline-step-etl" class="pipeline-step" data-status="waiting">
+                <span class="pipeline-marker" aria-hidden="true">2</span>
+                <div class="pipeline-step-copy"><strong>ETL</strong><span>AI normalization to PostgreSQL</span><span id="pipeline-status-etl">Waiting</span></div>
+                <span id="pipeline-time-etl" class="pipeline-time" aria-label="ETL elapsed time">00:00</span>
+              </li>
+            </ol>
+            <p class="hint">Total elapsed: <span id="pipeline-time-total" class="pipeline-time">00:00</span>. Activity animation indicates work in progress, not percentage completed.</p>
+          </section>
+          <p id="scraper-result" role="status" aria-live="polite"></p>
+          <form id="pipeline-schedule-form" class="pipeline-schedule-form">
+            <h3>Automatic runs</h3>
+            <label>Frequency<select id="pipeline-frequency"><option value="off">Disabled</option><option value="weekly">Once a week</option><option value="biweekly">Once every two weeks</option><option value="monthly">Once a month</option></select></label>
+            <p class="hint">02:00 Europe/Rome. Weekly and every-two-week runs occur on Sunday; monthly runs occur on the 1st. Automatic runs use the backend's AI_API_KEY, not the key entered above. The backend must be running.</p>
+            <button id="pipeline-schedule-save" class="secondary" type="submit">Save schedule</button>
+            <p id="pipeline-schedule-status" role="status" aria-live="polite"></p>
+          </form>
+        </section>
         <section class="panel queue" aria-label="Submitted hackathons">
           <div class="toolbar">
             <label>Status<select id="status-filter"><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="all">All submissions</option></select></label>

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     )
 
     app_env: str = Field(default="development", alias="APP_ENV")
+    gateway_internal_secret: str = Field(default="", alias="GATEWAY_INTERNAL_SECRET")
     database_url: str = Field(alias="DATABASE_URL")
     mongodb_connection_string: str = Field(alias="MONGODB_CONNECTION_STRING")
     mongodb_database_name: str = Field(

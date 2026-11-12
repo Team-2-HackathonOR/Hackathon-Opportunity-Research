@@ -77,6 +77,7 @@ driver. Explicit driver selections are preserved.
 
 - `DATABASE_URL` - PostgreSQL SQLAlchemy URL, for example `postgresql+psycopg://USERNAME:PASSWORD@HOST:5432/hackathons`
 - `AI_API_KEY` - API key for the configured OpenAI-compatible provider
+- `GATEWAY_INTERNAL_SECRET` - must match the main gateway for API requests
 
 ## Database initialization
 
@@ -151,6 +152,23 @@ The Kubernetes manifests and [skaffold.yaml](../skaffold.yaml) expect the ETL im
 - `POST /events` - insert one fully normalized event plus nested related records
 - `POST /etl/import/mongodb` - extract raw records from MongoDB, normalize them, and insert them
 - `POST /etl/import/file` - upload `.json`, `.jsonl`, or `.csv` records, normalize them, and insert them
+
+API operations require the main gateway's `x-gateway-caller` and
+`x-gateway-secret` headers. Direct requests are rejected. Pipeline imports
+are routed through the main gateway; the CLI import remains available to
+local operators.
+
+For manual operations, use the main gateway's `/api/etl/*` prefix with an
+admin JWT, such as `POST /api/etl/events` or
+`POST /api/etl/etl/import/file`; the gateway adds the internal headers.
+
+The admin pipeline calls the MongoDB import with `fetched_at` set to the
+scraper run's timestamp and `limit: null`, importing all records from that run.
+Unlimited imports require a timestamp; ordinary imports retain the default
+25-record limit. An optional `x-ai-api-key` header overrides the configured AI
+key for this request only; shared settings and environment variables are not
+changed. The admin pipeline supplies the key for both pagination and ETL AI
+normalization. Scraper and ETL must use the same MongoDB database and collection.
 
 ## AI normalization
 

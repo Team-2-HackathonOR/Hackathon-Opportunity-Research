@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const express = require("express");
+const { mkdtempSync, rmSync, readFileSync } = require("node:fs");
+const { join } = require("node:path");
+const { tmpdir } = require("node:os");
 const { createAdminRouter, moderationBody } = require("../admin");
 
 const adminUser = {
@@ -45,10 +48,20 @@ test("moderation validation", async (t) => {
 });
 
 test("protected admin HTTP workflow", async (t) => {
+  const previousSecret = process.env.GATEWAY_INTERNAL_SECRET;
+  process.env.GATEWAY_INTERNAL_SECRET = "gateway-test-secret";
+  t.after(() => {
+    if (previousSecret === undefined) delete process.env.GATEWAY_INTERNAL_SECRET;
+    else process.env.GATEWAY_INTERNAL_SECRET = previousSecret;
+  });
   const app = express();
-  app.use("/api/admin", createAdminRouter(() => ({
+  const directory = mkdtempSync(join(tmpdir(), "hackscout-admin-schedule-"));
+  t.after(() => rmSync(directory, { recursive: true }));
+  const storePath = join(directory, "schedule.json");
+  const router = createAdminRouter(() => ({
     endpoint: "https://project.supabase.test/graphql/v1", secretKey: "sb_secret_test_fixture",
-  })));
+  }), () => "http://scraper.test", { storePath, startTimer: false });
+  app.use("/api/admin", router);
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -78,12 +91,54 @@ test("protected admin HTTP workflow", async (t) => {
       const result = await request("suggestions", { authorization: "" });
       assert.equal(result.status, 401);
       assert.equal(result.headers.get("cache-control"), "no-store");
+      assert.equal((await request("scraper/run", {
+        method: "POST", authorization: "", body: { apiKey: "run-only-key" },
+      })).status, 401);
+      assert.equal((await request("pipeline/run", {
+        method: "POST", authorization: "", body: { apiKey: "run-only-key" },
+      })).status, 401);
+      assert.equal((await request("pipeline/schedule", { authorization: "" })).status, 401);
+      assert.equal((await request("pipeline/schedule", {
+        method: "POST", authorization: "", body: { frequency: "weekly" },
+      })).status, 401);
+    });
+  await scenario("admin schedules persist only cadence and never manual API keys",
+    () => json(adminUser), async (request) => {
+      const previousKey = process.env.AI_API_KEY;
+      try {
+        delete process.env.AI_API_KEY;
+        assert.equal((await request("pipeline/schedule")).body.schedule.keyConfigured, false);
+        assert.equal((await request("pipeline/schedule", {
+          method: "POST", body: { frequency: "weekly" },
+        })).status, 400);
+        process.env.AI_API_KEY = "server-key-fixture";
+        assert.equal((await request("pipeline/schedule", {
+          method: "POST", body: { frequency: "daily" },
+        })).status, 400);
+        const saved = await request("pipeline/schedule", {
+          method: "POST", body: { frequency: "monthly", apiKey: "manual-key-fixture" },
+        });
+        assert.equal(saved.status, 200);
+        assert.equal(saved.body.schedule.frequency, "monthly");
+        assert.equal(saved.body.schedule.timeZone, "Europe/Rome");
+        assert.equal((await request("pipeline/schedule")).body.schedule.nextRunAt, saved.body.schedule.nextRunAt);
+        assert.equal(/server-key-fixture|manual-key-fixture/.test(readFileSync(storePath, "utf8")), false);
+        assert.equal((await request("pipeline/schedule", {
+          method: "POST", body: { frequency: "off" },
+        })).body.schedule.nextRunAt, null);
+      } finally {
+        if (previousKey === undefined) delete process.env.AI_API_KEY;
+        else process.env.AI_API_KEY = previousKey;
+      }
     });
   await scenario("viewer cannot read or moderate submissions",
     () => json({ ...adminUser, role: "viewer" }), async (request) => {
       assert.equal((await request("suggestions")).status, 403);
       assert.equal((await request("suggestions/1/review", {
         method: "POST", body: { decision: "rejected", notes: "Reject" },
+      })).status, 403);
+      assert.equal((await request("pipeline/run", {
+        method: "POST", body: { apiKey: "run-only-key" },
       })).status, 403);
     });
   await scenario("expired tokens and unavailable auth fail closed",
@@ -212,6 +267,50 @@ test("protected admin HTTP workflow", async (t) => {
       assert.equal((await request("suggestions/1/review", {
         method: "POST", body: { decision: "rejected", notes: "Reject" },
       })).status, 404);
+    });
+  await scenario("admin scraper action forwards the run-only key and returns a safe summary",
+    (url, options) => {
+      if (url.pathname === "/api/auth/me") return json(adminUser);
+      assert.equal(url.href, "http://scraper.test/api/internal/scraper/hackathons/persist-all?startPage=1");
+      assert.equal(options.headers["x-ai-api-key"], "run-only-key");
+      return json({
+        persisted: true,
+        pagesPersisted: 4,
+        hackathonsPersisted: 82,
+        uniqueHackathonsPersisted: 80,
+      });
+    }, async (request) => {
+      const result = await request("scraper/run", {
+        method: "POST", body: { apiKey: "run-only-key" },
+      });
+      assert.equal(result.status, 200);
+      assert.deepEqual(result.body, {
+        pagesPersisted: 4,
+        hackathonsPersisted: 82,
+        uniqueHackathonsPersisted: 80,
+      });
+      assert.equal(JSON.stringify(result.body).includes("run-only-key"), false);
+    });
+  await scenario("scraper action requires an API key before contacting the scraper",
+    (url) => {
+      assert.equal(url.pathname, "/api/auth/me");
+      return json(adminUser);
+    }, async (request) => {
+      const result = await request("scraper/run", {
+        method: "POST", body: { apiKey: "" },
+      });
+      assert.equal(result.status, 400);
+    });
+  await scenario("scraper action rejects an empty response instead of reporting success",
+    (url) => url.pathname === "/api/auth/me"
+      ? json(adminUser)
+      : new Response("", { status: 200 }),
+    async (request) => {
+      const result = await request("scraper/run", {
+        method: "POST", body: { apiKey: "run-only-key" },
+      });
+      assert.equal(result.status, 502);
+      assert.match(result.body.error, /empty or invalid response/);
     });
   await scenario("duplicate publication returns a conflict",
     (url) => url.pathname === "/api/auth/me" ? json(adminUser) : json({ code: "23505" }, 409),

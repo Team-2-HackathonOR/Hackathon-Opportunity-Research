@@ -227,7 +227,8 @@ class EventResponse(BaseModel):
 class MongoImportRequest(BaseModel):
     database_name: str | None = None
     collection_name: str | None = None
-    limit: int = Field(default=25, ge=1, le=1000)
+    limit: int | None = Field(default=25, ge=1, le=1000)
+    fetched_at: str | None = Field(default=None, min_length=1, max_length=40)
     use_ai_normalization: bool = True
     primary_researcher_id: int | None = None
     verifier_id: int | None = None
@@ -259,4 +260,3 @@ class RawImportRecord(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     data: dict[str, Any]
-

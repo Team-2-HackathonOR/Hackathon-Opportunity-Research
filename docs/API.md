@@ -6,7 +6,35 @@ Base URL (local): `http://localhost:4000`
 
 HS256 JWTs. The JWT service signs them and checks the signature, issuer (`team-2-gateway`), expiry, the stored token row, and the account role. The gateway asks that service before it forwards a protected call. Tokens last 2 hours. `POST /api/auth/logout` revokes the current token. `POST /verify` is internal to the gateway.
 
-`POST /api/auth/login` and `POST /api/auth/invitations/accept` are public. `POST /api/auth/invitations` and `POST /api/auth/users/:id/revoke-sessions` require an admin token. Logout requires any signed-in role.
+`POST /api/auth/login`, `POST /api/auth/register`, and `POST /api/auth/invitations/accept` are public. `POST /api/auth/invitations` and `POST /api/auth/users/:id/revoke-sessions` require an admin token. Logout requires any signed-in role.
+
+Public registration accepts `{ "email": "you@example.com", "password": "your-password" }`
+and creates a local **viewer** account. Passwords require at least 8 characters
+and at most 72 UTF-8 bytes. Additional fields (including `role`) are rejected.
+It returns HTTP 201 with the same session shape as login. Existing emails return
+409 without changing the account. HackScout forwards these calls through its
+main gateway on port 4000 directly via the static frontend's proxy.
+
+HackScout guest listings use `GET /api/hackscout/hackathons`; suggestions use
+`POST /api/hackscout/suggestions`. These are public but gateway-rate-limited.
+Admin operations use `/api/hackscout/admin/*` and require an admin JWT (login
+is public). The gateway forwards these paths to the protected HackScout backend
+with its internal caller and secret. Existing protected `/api/hackathons`
+research-service routes are unchanged.
+
+Manual ETL operations use `/api/etl/*` with an admin JWT; for example
+`POST /api/etl/etl/import/file` and `POST /api/etl/events`. Scraper operations
+use the existing authenticated `/api/scraper/*` prefix, which strips that
+prefix before forwarding to the scraper.
+
+Pipeline requests use `/api/internal/scraper/hackathons/persist-all` and
+`/api/internal/etl/etl/import/mongodb`; only trusted internal callers with the
+gateway secret can access these. Browser JWTs alone cannot call these routes.
+
+Rate limiting uses an in-memory, per-process IP counter: 300 requests per
+60 seconds by default (`RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MS`). Authentication
+routes override this to 30 per minute. Exceeding a limit returns HTTP 429.
+Counters reset on restart and are not shared between gateway replicas.
 
 ```json
 { "email": "researcher@local", "password": "change-me-researcher" }
@@ -155,19 +183,14 @@ The live tables are `hackathon_research` in `supabase/migrations/20261020180000_
 
 See `docs/RESEARCH-SOP.md` for human research standards.
 
-## Standalone HackScout API
-
-The standalone gateway's `GET /api/hackathons` and `POST /api/suggestions`
-require a valid JWT in the `Authorization: Bearer <token>` header. The gateway
-checks each request against the main gateway's `/api/auth/me`; missing or
-expired sessions return 401, and authentication-service failures return 502.
-`GET /api/health` remains available for health checks.
-
 ## Standalone HackScout moderation API
 
 This is separate from the main gateway's `/admin/*` operations above.
-Base URL: `http://localhost:3002/api/admin`. The browser UI is served at
-`http://localhost:3002/admin/`.
+Public base URL: `http://localhost:4000/api/hackscout/admin` (also forwarded by
+the static UI servers). The admin UI is served at `http://localhost:3003` or
+through the gateway at `http://localhost:4000/hackscout-admin/`.
+Port 3002 is a backend: direct API requests without gateway credentials
+are rejected.
 
 `AUTH_GATEWAY_URL` points to the main gateway (default
 `http://127.0.0.1:4000`). Login reuses `/api/auth/login`, verifies the issued
@@ -183,6 +206,10 @@ Responses use `Cache-Control: no-store`.
 | POST | `/logout` | Revoke the current JWT; returns `{status:"signed_out"}` |
 | GET | `/suggestions` | Searchable, paginated submission queue |
 | POST | `/suggestions/:id/review` | Atomically approve/publish or reject |
+| POST | `/pipeline/run` | Start scraper then ETL with a run-only `{apiKey}`; returns HTTP 202 `{job}` |
+| GET | `/pipeline` | Current run stage, counts, and failure status; returns `{job}` |
+| GET | `/pipeline/schedule` | Saved frequency, next run, timezone, and server-key availability |
+| POST | `/pipeline/schedule` | Save `{frequency:"off"|"weekly"|"biweekly"|"monthly"}`; requires server AI_API_KEY unless off |
 
 Queue parameters: `status=pending|approved|rejected|all` (default `pending`),
 `page` (one-based, default `1`), and `search` (event name or website, maximum

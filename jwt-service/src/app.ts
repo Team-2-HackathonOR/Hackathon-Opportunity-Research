@@ -6,7 +6,7 @@ import { ZodError } from "zod";
 import { env } from "./config/env.js";
 import type { InvitationStore } from "./db/invitations.js";
 import { createMemoryTokenStore, type TokenStore } from "./db/token-store.js";
-import type { DirectoryAccountInput, DirectoryAccountResult, UserStore } from "./db/users.js";
+import type { DirectoryAccountInput, DirectoryAccountResult, RegistrationStore, UserStore } from "./db/users.js";
 import { authorizeGatewayCaller } from "./lib/gateway-auth.js";
 import type { DirectoryAuthenticator } from "./lib/directory.js";
 import type { DirectoryGroupMapping } from "./lib/directory-role.js";
@@ -17,10 +17,12 @@ import { healthRoutes } from "./routes/health.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { loginRoutes } from "./routes/login.js";
 import { logoutRoutes } from "./routes/logout.js";
+import { registrationRoutes } from "./routes/register.js";
 import { verifyRoutes } from "./routes/verify.js";
 
 export type BuildAppOptions = {
   userStore: UserStore;
+  registrationStore?: RegistrationStore;
   invitationStore?: InvitationStore;
   tokenStore?: TokenStore;
   checkDatabase?: () => Promise<boolean>;
@@ -92,6 +94,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     }),
   );
   await app.register(verifyRoutes(options.userStore, tokenStore));
+  await app.register(
+    registrationRoutes(options.registrationStore, tokenStore, options.bcryptRounds ?? env.BCRYPT_ROUNDS),
+  );
   await app.register(logoutRoutes(options.userStore, tokenStore));
   await app.register(
     invitationRoutes(options.invitationStore, tokenStore, options.bcryptRounds ?? env.BCRYPT_ROUNDS, sendMail),

@@ -93,12 +93,20 @@ The root `dev` script starts the hackathon service (4001), JWT service (4004),
 scraper (3000), main gateway (4000), standalone HackScout API (3002), static
 client (3001), admin UI (3003), mail service (4005), and ETL service (8000).
 `concurrently` labels each process and stops the others if one exits. Open
-`http://localhost:3001` for the client or `http://localhost:3003` for the admin
-UI; their `/api` requests are proxied to the standalone HackScout API.
-Configure `scraper/.env` and have MongoDB available
-if you need scraper persistence.
+`http://localhost:3001` for the public client; its `/api` requests are proxied
+to the main gateway on port 4000. Open `http://localhost:3003` for the admin UI;
+its API requests also use the main gateway.
+Configure `scraper/.env` and have MongoDB available if you need scraper
+persistence.
 
 The client shows six events per page, including closed listings by default.
+HackScout at `http://localhost:3001` is the main application entrance: sign in,
+create a viewer account, or select **Continue as guest** to explore. Public
+registration requires a valid email and a password of at least 8 characters
+(at most 72 UTF-8 bytes). Sessions remain in page memory; reload requires
+signing in again. The header allows guests to return to account access and
+signed-in users to sign out. The main gateway and JWT service must be running
+for signup and login; guest listings retain their existing access behavior.
 Use Previous, Next, or the page selector to browse every matching event.
 Keyword search covers all loaded events, not just the current page; suggestions
 offer event names, organizers, locations, and topics as you type. Changing a
@@ -118,17 +126,9 @@ topics and the general-event fallback have their own image.
 
 ### Admin submission moderation
 
-The application redirects users without a valid session to general sign-in at
-`http://localhost:3001/login/` or `http://localhost:3002/login/`. It uses the JWT service through the main
-gateway. Admins are redirected to moderation; viewers and researchers return to
-the public UI. The JWT is kept in session storage for the current browser tab;
-sign out or close the tab to remove it. Listings and suggestions require a
-valid JWT checked by the server; static UI files are not private. Browser storage is isolated by origin,
-so keep using the same port when navigating between login and moderation.
-
-Open `http://localhost:3003` through the full service launcher,
-`http://localhost:3002/admin/` directly, or `http://localhost:3001/admin/`
-through the static client's proxy. The public footer includes an Admin link.
+Open `http://localhost:3003` for the standalone admin UI, or
+`http://localhost:3001/hackscout-admin/` through the public client's gateway
+proxy. The public footer includes an Admin link.
 Sign in with an existing account whose JWT role is `admin`; viewer and
 researcher accounts cannot access the moderation API. Configure
 `AUTH_GATEWAY_URL=http://127.0.0.1:4000` in `hackscout-gateway/.env` when the
@@ -156,6 +156,51 @@ link, topics, and fee details. An end date cannot precede the start date.
 Approval publishes the listing and records the review in one database
 transaction as **Needs Confirmation** with low confidence, not verified
 eligibility. Refresh public listings to see newly published events.
+
+Admins can run the complete pipeline from the admin dashboard. Enter an
+OpenAI-compatible API key for each run: the scraper first persists Devpost pages
+to MongoDB, then ETL imports this scrape's records with AI normalization into
+PostgreSQL. The key is used only during that run, not saved, and immediately
+cleared from the form. Both services use their own `AI_BASE_URL` and `AI_MODEL`.
+Configure `HACKSCOUT_SERVICE_URL`, `SCRAPER_SERVICE_URL`, and `ETL_SERVICE_URL`
+in `gateway/.env` if they differ from ports 3002, 3000, and 8000 on localhost.
+Set the same `GATEWAY_INTERNAL_SECRET` in the gateway, HackScout API,
+scraper, and ETL environment files. Backend API requests without the gateway
+caller and secret are rejected; do not put this secret in frontend code.
+Pipeline stages call internal gateway routes rather than the services directly.
+Both services must use the same MongoDB database and collection.
+ETL must point to the research database used by public listings.
+
+Only one pipeline runs at a time per standalone API process. The dashboard
+polls its stage and result; closing the page does not cancel a run. Run status
+includes server-recorded start/end timestamps for scraper and ETL. Animated
+stage cards show live elapsed time and freeze each duration when that stage
+finishes or fails. Waiting/skipped stages have no elapsed time. Reduced-motion
+preferences disable the activity animations; no percentage progress is inferred.
+Run status is in server memory and is lost on server restart. ETL is insert-only: existing
+events or normalization failures are reported as failures, while successful
+inserts remain saved. Review failures before repeating a run; reruns do not
+update existing research events.
+
+**Automatic runs:** choose Disabled, Once a week, Once every two weeks, or
+Once a month and save the schedule. Weekly schedules start on the next Sunday
+at 02:00 Europe/Rome; every-two-week schedules repeat from that first Sunday.
+Monthly runs occur on the 1st at 02:00 Europe/Rome. On the spring daylight-saving
+transition, the nonexistent 02:00 runs at 03:00; the autumn repeated hour runs
+only once.
+
+Configure `AI_API_KEY` in `hackscout-gateway/.env` before enabling a schedule.
+Manual form keys are never saved or reused for automatic runs. The schedule
+(without secrets) persists in the git-ignored
+`hackscout-gateway/.data/pipeline-schedule.json`, or `PIPELINE_SCHEDULE_PATH`.
+Keep that location writable and persistent. Run one scheduler process only;
+this is not a distributed scheduler. The backend must remain running. After
+downtime, one overdue run is attempted, not every missed interval. A busy
+pipeline defers the automatic run until it is free. Restarting during a run
+interrupts it; the in-memory job is not resumed. Due times are advanced on disk
+before starting a run to avoid duplicate launches after a restart; a crash
+between that write and launch requires a manual retry. Scheduler errors are
+logged and shown in the admin dashboard.
 
 Rejection requires a review note and never creates a listing. Approved and
 rejected submissions retain reviewer ID, timestamp, note, and any published

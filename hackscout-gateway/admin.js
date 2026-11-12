@@ -1,4 +1,6 @@
 const express = require("express");
+const { createPipelineController } = require("./pipeline");
+const { createPipelineSchedule } = require("./pipeline-schedule");
 
 class AdminError extends Error {
   constructor(status, message) {
@@ -76,8 +78,15 @@ function moderationBody(body) {
   return { decision: body.decision, notes, event };
 }
 
-function createAdminRouter(getSupabaseConfig) {
+function createAdminRouter(
+  getSupabaseConfig,
+  getScraperUrl = () => process.env.AUTH_GATEWAY_URL || "http://127.0.0.1:4000",
+  scheduleOptions = {},
+) {
   const router = express.Router();
+  const pipeline = createPipelineController();
+  const schedule = createPipelineSchedule(pipeline, scheduleOptions);
+  router.closeScheduler = () => schedule.close();
   router.use((_request, response, next) => {
     response.set("Cache-Control", "no-store");
     next();
@@ -171,9 +180,71 @@ function createAdminRouter(getSupabaseConfig) {
     next();
   });
   router.get("/session", (request, response) => response.json(request.adminUser));
+  router.get("/pipeline", (_request, response) => response.json({ job: pipeline.get() }));
+  router.get("/pipeline/schedule", (_request, response) => response.json({ schedule: schedule.get() }));
+  router.post("/pipeline/schedule", express.json({ limit: "1kb" }), (request, response) => {
+    const frequency = request.body?.frequency;
+    if (!["off", "weekly", "biweekly", "monthly"].includes(frequency)) {
+      throw new AdminError(400, "Choose disabled, weekly, every two weeks, or monthly.");
+    }
+    if (frequency !== "off" && !process.env.AI_API_KEY?.trim()) {
+      throw new AdminError(400, "Configure AI_API_KEY on the HackScout backend before enabling automatic runs.");
+    }
+    response.json({ schedule: schedule.update(frequency) });
+  });
+  router.post("/pipeline/run", express.json({ limit: "8kb" }), (request, response) => {
+    const apiKey = text(request.body?.apiKey, "AI API key", 4096, true);
+    const job = pipeline.start(apiKey);
+    if (!job) throw new AdminError(409, "A pipeline run is already in progress.");
+    response.status(202).json({ job });
+  });
   router.post("/logout", async (request, response) => {
     await authRequest("logout", { authorization: request.headers.authorization, body: {} });
     response.json({ status: "signed_out" });
+  });
+  router.post("/scraper/run", express.json({ limit: "8kb" }), async (request, response) => {
+    const apiKey = text(request.body?.apiKey, "AI API key", 4096, true);
+    const scraperUrl = new URL(getScraperUrl());
+    if (!["http:", "https:"].includes(scraperUrl.protocol)) {
+      throw new AdminError(503, "The scraper service URL must use HTTP or HTTPS.");
+    }
+    const target = new URL("/api/internal/scraper/hackathons/persist-all?startPage=1", scraperUrl);
+    if (!process.env.GATEWAY_INTERNAL_SECRET) {
+      throw new AdminError(503, "Gateway authorization is not configured.");
+    }
+    let upstream;
+    try {
+      upstream = await fetch(target, {
+        headers: {
+          "x-ai-api-key": apiKey,
+          "x-gateway-caller": "team-2-gateway",
+          "x-gateway-secret": process.env.GATEWAY_INTERNAL_SECRET,
+        },
+        signal: AbortSignal.timeout(600000),
+      });
+    } catch {
+      throw new AdminError(502, "The scraper could not be reached or timed out.");
+    }
+    let payload;
+    try {
+      payload = JSON.parse(await upstream.text());
+    } catch {
+      throw new AdminError(502, "The scraper returned an empty or invalid response.");
+    }
+    if (!upstream.ok) {
+      throw new AdminError(502, "The scraper run failed. Check the scraper service logs.");
+    }
+    if (!payload || payload.persisted !== true ||
+        !Number.isInteger(payload.pagesPersisted) ||
+        !Number.isInteger(payload.hackathonsPersisted) ||
+        !Number.isInteger(payload.uniqueHackathonsPersisted)) {
+      throw new AdminError(502, "The scraper returned an invalid run summary.");
+    }
+    response.json({
+      pagesPersisted: payload.pagesPersisted,
+      hackathonsPersisted: payload.hackathonsPersisted,
+      uniqueHackathonsPersisted: payload.uniqueHackathonsPersisted,
+    });
   });
   router.get("/suggestions", async (request, response) => {
     const status = request.query.status || "pending";

@@ -12,18 +12,38 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div id="auth-check" role="status" aria-live="polite">Checking your session...</div>
-    <div id="app" hidden>
+    <main id="account-entrance" class="account-entrance">
+      <section class="account-card" aria-labelledby="account-title">
+        <a class="brand" href="/" aria-label="HackScout home">hackscout<span class="brand-period">.</span></a>
+        <p class="eyebrow">YOUR NEXT BUILD STARTS HERE</p>
+        <h1 id="account-title">Welcome to HackScout</h1>
+        <p>Find your next hackathon. Sign in, create an account, or explore as a guest.</p>
+        <div class="account-tabs">
+          <button id="account-login-tab" type="button" aria-pressed="true">Sign in</button>
+          <button id="account-register-tab" type="button" aria-pressed="false">Create account</button>
+        </div>
+        <form id="account-form">
+          <label>Email<input id="account-email" type="email" autocomplete="username" required maxlength="254" /></label>
+          <label>Password<input id="account-password" type="password" autocomplete="current-password" required /></label>
+          <label id="account-confirm-label" hidden>Confirm password<input id="account-confirm" type="password" autocomplete="new-password" /></label>
+          <p id="account-password-hint" class="account-hint" hidden>Use at least 8 characters and at most 72 UTF-8 bytes. New accounts have viewer access.</p>
+          <button id="account-submit" class="account-primary" type="submit">Sign in</button>
+          <p id="account-feedback" role="status" aria-live="polite"></p>
+        </form>
+        <button id="account-guest" class="account-guest" type="button">Continue as guest</button>
+        <p class="account-hint">Your sign-in session stays in page memory only. Reloading requires signing in again.</p>
+      </section>
+    </main>
+    <div id="application-shell" hidden>
     <header class="site-header">
       <a class="brand" href="#" aria-label="HackScout home"><span class="brand-symbol"><i></i><i></i><i></i></span><span>hackscout<span class="brand-period">.</span></span></a>
       <nav class="main-nav" aria-label="Main navigation">
         <a class="nav-link active" href="#discover">Explore</a>
         <a class="nav-link" href="#discover" data-quick-filter="Virtual">Online events</a>
         <button class="nav-link saved-nav" id="saved-nav"><span class="heart-icon">♡</span> Saved <span class="saved-count" id="saved-count">0</span></button>
-        <a class="nav-link" id="account-link" href="/login/">Sign in</a>
-        <button class="nav-link" id="account-logout" hidden>Sign out</button>
       </nav>
       <a class="submit-event" href="#list-event">List an event <span>↗</span></a>
+      <button class="submit-event account-menu" id="account-menu" type="button">Sign in / Create account</button>
       <button class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Toggle navigation">☰</button>
     </header>
 
@@ -121,10 +141,11 @@
       <section class="submit-section" id="list-event"><div><div class="eyebrow">GOT AN EVENT COMING UP?</div><h2>Bring the builders together.</h2><p>Help more people find your hackathon.</p></div><button class="submit-button" id="suggest-event">Suggest an event <span>↗</span></button></section>
     </main>
 
-    <footer class="site-footer"><a class="brand footer-brand" href="#"><span class="brand-symbol"><i></i><i></i><i></i></span><span>hackscout<span class="brand-period">.</span></span></a><span>Powered by Codyza</span><span>© 2026 HackScout <a href="/admin/">Admin</a> <a href="#discover">Back to top ↑</a></span></footer>
+    <footer class="site-footer"><a class="brand footer-brand" href="#"><span class="brand-symbol"><i></i><i></i><i></i></span><span>hackscout<span class="brand-period">.</span></span></a><span>Powered by Codyza</span><span>© 2026 HackScout <a href="/hackscout-admin/">Admin</a> <a href="#discover">Back to top ↑</a></span></footer>
+    </div>
 
     <div class="modal-backdrop" id="event-modal" aria-hidden="true"><section class="event-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-close" id="modal-close" aria-label="Close">×</button><div id="modal-content"></div></section></div>
-    </div>
-    <script src="/login/account.js"></script>
+    <script src="app.js"></script>
+    <script src="auth.js"></script>
   </body>
 </html>

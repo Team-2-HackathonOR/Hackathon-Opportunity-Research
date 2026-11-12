@@ -19,6 +19,7 @@ export async function createRuntime() {
         : undefined;
     const app = await buildApp({
       userStore: directory,
+      registrationStore: directory,
       invitationStore: directory,
       tokenStore: directory.tokens,
       checkDatabase: () => directory.check(),
