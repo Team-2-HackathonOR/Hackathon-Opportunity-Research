@@ -119,7 +119,7 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
     }
 
     if (path === "/admin" || path.startsWith("/admin/")) {
-      const result = await verifyBearer(request.headers.authorization);
+      const result = await verifyBearer(request.headers.authorization, request.log);
       if (result.status === "anonymous") {
         return;
       }
@@ -134,7 +134,7 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
       return;
     }
 
-    const result = await verifyBearer(request.headers.authorization);
+    const result = await verifyBearer(request.headers.authorization, request.log);
     if (path.startsWith("/api/hackscout/admin/") && result.status === "invalid") {
       reply.header("Set-Cookie", adminSessionCookie("", 0, env.NODE_ENV === "production"));
     }
