@@ -66,6 +66,10 @@ accounts only when their intended owners are ready to activate them.**
 The main gateway
 and JWT service must be running; `AUTH_GATEWAY_URL` in
 `hackscout-gateway/.env` defaults to `http://127.0.0.1:4000`.
+Pipeline requests also verify the administrator through `/api/auth/me`.
+If that check is rejected, the backend reports the upstream HTTP status and
+route and logs the gateway origin without logging credentials. Inspect the
+HackScout backend deployment logs alongside the main gateway logs.
 
 Apply [`20261106170000_event_suggestion_moderation.sql`](./supabase/migrations/20261106170000_event_suggestion_moderation.sql) after the research schema and listing-access migrations. It creates or upgrades the suggestions table, adds review history, and enables atomic publication.
 

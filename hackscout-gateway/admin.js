@@ -98,17 +98,20 @@ function createAdminRouter(
     const upstream = await fetch(target, {
       method: route === "me" ? "GET" : "POST",
       headers: {
-        "Content-Type": "application/json",
+        ...(route === "me" ? {} : { "Content-Type": "application/json" }),
         ...(authorization ? { authorization } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(10000),
     });
     if (!upstream.ok) {
+      console.error("Administrator authentication gateway rejected a request.", {
+        origin: target.origin, path: target.pathname, status: upstream.status,
+      });
       const status = [400, 401, 403, 429].includes(upstream.status) ? upstream.status : 502;
       const message = upstream.status === 401 ? "Invalid credentials or an expired session."
         : upstream.status === 429 ? "Too many login attempts. Please try again later."
-          : "The authentication service could not complete this request.";
+          : `The authentication gateway returned HTTP ${upstream.status} for ${target.pathname}. Check the HackScout backend's AUTH_GATEWAY_URL and the gateway deployment logs.`;
       throw new AdminError(status, message);
     }
     return upstream.json();
