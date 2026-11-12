@@ -15,8 +15,8 @@ Deno.test("both functions reject direct callers before health, parsing, scheduli
   Deno.env.set("GATEWAY_INTERNAL_SECRET", headers["x-gateway-secret"]);
   try {
     for (const [handler, functionName, paths] of [
-      [handleRequest, "scraper", ["", "/health", "/pipeline", "/pipeline/run", "/pipeline/tick", "/schedule", "/hackathons/reset"]],
-      [handleETL, "etl", ["", "/health", "/events", "/team-members", "/etl/import/mongodb", "/etl/import/file"]],
+      [handleRequest, "scraper", ["", "/health", "/pipeline", "/pipeline/run", "/pipeline/restart", "/pipeline/cancel", "/pipeline/tick", "/schedule", "/hackathons/reset"]],
+      [handleETL, "etl", ["", "/health", "/events", "/team-members", "/etl/import/storage", "/etl/import/mongodb", "/etl/import/file"]],
     ] as const) {
       for (const path of paths) {
         for (const method of ["GET", "POST", "OPTIONS"]) {
@@ -34,6 +34,31 @@ Deno.test("both functions reject direct callers before health, parsing, scheduli
       headers: { ...headers, "x-user-role": "viewer" },
     }));
     assert(viewer.status === 403, "Pipeline control must not accept viewer identities.");
+    for (const role of ["viewer", ""]) {
+      const cancel = await handleRequest(new Request("https://example.test/functions/v1/scraper/pipeline/cancel", {
+        method: "POST", headers: { ...headers, ...(role ? { "x-user-role": role } : {}) },
+        body: JSON.stringify({ jobId: "11111111-1111-4111-8111-111111111111" }),
+      }));
+      assert(cancel.status === 403, "Only verified administrators may stop a run.");
+    }
+    const invalid = await handleRequest(new Request("https://example.test/functions/v1/scraper/pipeline/cancel", {
+      method: "POST", headers: { ...headers, "x-user-role": "admin" }, body: JSON.stringify({ jobId: "invalid" }),
+    }));
+    assert(invalid.status === 400, "Invalid stop targets must fail before database access.");
+    const restart = "https://example.test/functions/v1/scraper/pipeline/restart";
+    for (const role of ["viewer", ""]) {
+      const denied = await handleRequest(new Request(restart, {
+        method: "POST", headers: { ...headers, ...(role ? { "x-user-role": role } : {}) },
+        body: JSON.stringify({ jobId: "11111111-1111-4111-8111-111111111111", apiKey: "fixture" }),
+      }));
+      assert(denied.status === 403, "Restart requires a verified administrator.");
+    }
+    for (const payload of [{ jobId: "invalid", apiKey: "fixture" }, { jobId: "11111111-1111-4111-8111-111111111111" }]) {
+      const rejected = await handleRequest(new Request(restart, {
+        method: "POST", headers: { ...headers, "x-user-role": "admin" }, body: JSON.stringify(payload),
+      }));
+      assert(rejected.status === 400, "Invalid restart requests must fail before database access.");
+    }
   } finally {
     if (previous === undefined) Deno.env.delete("GATEWAY_INTERNAL_SECRET");
     else Deno.env.set("GATEWAY_INTERNAL_SECRET", previous);
@@ -44,6 +69,7 @@ Deno.test("ETL function paths preserve gateway-facing endpoint paths", () => {
   assert(etlPath("https://example.test/functions/v1/etl/etl/import/mongodb") === "/etl/import/mongodb");
   assert(etlPath("https://example.test/etl/etl/import/file") === "/etl/import/file");
   assert(etlPath("https://example.test/etl/import/mongodb") === "/etl/import/mongodb");
+  assert(etlPath("https://example.test/functions/v1/etl/etl/import/storage") === "/etl/import/storage");
   assert(etlPath("https://example.test/functions/v1/etl/events") === "/events");
   assert(etlPath("https://example.test/etl/team-members") === "/team-members");
 });

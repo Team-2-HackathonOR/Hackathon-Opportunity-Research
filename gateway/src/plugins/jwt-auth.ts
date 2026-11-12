@@ -107,7 +107,7 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
         || request.method === "POST" && [
           "/api/internal/scraper/hackathons/reset", "/api/internal/hackathons/reset",
         ].includes(path)
-        || request.method === "POST" && path === "/api/internal/etl/etl/import/mongodb"
+        || request.method === "POST" && ["/api/internal/etl/etl/import/storage", "/api/internal/etl/etl/import/mongodb"].includes(path)
         || request.method === "GET" && [
           "/api/internal/pipeline-worker/pipeline", "/api/internal/pipeline-worker/schedule",
         ].includes(path)

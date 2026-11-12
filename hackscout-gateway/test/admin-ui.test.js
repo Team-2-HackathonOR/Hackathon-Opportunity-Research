@@ -1,48 +1,6 @@
 const assert = require("node:assert/strict");
-const { join } = require("node:path");
 const { test } = require("node:test");
-const vm = require("node:vm");
-const { loadBrowserScripts } = require("./browser-script-loader");
-
-function createPage(session, setupRequired) {
-  const elements = new Map();
-  function element(selector) {
-    if (!elements.has(selector)) elements.set(selector, {
-      value: "", hidden: false, disabled: false, textContent: "", innerHTML: "",
-      dataset: {}, listeners: {},
-      classList: { toggle() {}, add() {}, remove() {} },
-      addEventListener(event, listener) { this.listeners[event] = listener; },
-      focus() {},
-    });
-    return elements.get(selector);
-  }
-  const calls = [];
-  const context = vm.createContext({
-    document: { querySelector: element },
-    console: { error() {} },
-    AbortController, URLSearchParams, setTimeout: () => 1, setInterval: () => 1,
-    clearTimeout() {}, clearInterval() {},
-    fetch: async (url, options = {}) => {
-      const action = url.split("/api/hackscout/admin/")[1];
-      calls.push({ action, options });
-      if (action === "auth/session") return Response.json(session.signedIn ? { user: { email: "fixture@example.test", role: "admin" } } : { error: "Sign in" }, { status: session.signedIn ? 200 : 401 });
-      if (action === "auth/access") return Response.json({ email: "fixture@example.test", passwordSetupRequired: setupRequired });
-      if (action === "auth/login" || action === "auth/create-password") {
-        session.signedIn = true;
-        return Response.json({ user: { email: "fixture@example.test", role: "admin" } });
-      }
-      if (action === "auth/logout") { session.signedIn = false; return Response.json({ ok: true }); }
-      if (action === "pipeline") return Response.json({ job: null });
-      if (action === "pipeline/schedule") return Response.json({ schedule: { frequency: "off", keyConfigured: false } });
-      if (action.startsWith("suggestions?")) return Response.json({ items: [], total: 0, pageSize: 12 });
-      throw new Error(`Unexpected test request: ${action}`);
-    },
-  });
-  loadBrowserScripts(join(__dirname, "..", "..", "admin-ui"), context);
-  const submit = () => element("#login-form").listeners.submit({ preventDefault() {} });
-  const ready = () => new Promise((resolve) => setImmediate(resolve));
-  return { element, calls, submit, ready };
-}
+const { createPage } = require("./admin-ui-helpers");
 
 test("admin email-first setup confirms password, signs in, restores session and signs out", async () => {
   const session = { signedIn: false };
@@ -88,4 +46,137 @@ test("existing admins sign in with a password and can change email", async () =>
   await page.submit();
   assert.equal(page.calls.some(({ action }) => action === "auth/login"), true);
   assert.equal(page.element("#dashboard").hidden, false);
+});
+
+test("pipeline authentication errors do not log out a valid administrator session", async () => {
+  for (const status of [401, 403]) {
+    const page = createPage({ signedIn: true }, false, {
+      pipeline: () => Response.json({ error: "Pipeline gateway authorization failed." }, { status }),
+    });
+    await page.ready();
+    assert.equal(page.element("#dashboard").hidden, false);
+    assert.equal(page.element("#login-panel").hidden, true);
+    assert.match(page.element("#scraper-result").textContent, /Pipeline gateway authorization failed/);
+    assert.equal(page.calls.filter(({ action }) => action === "auth/session").length, 2);
+  }
+});
+
+test("expired administrator sessions still sign out when protected requests fail", async () => {
+  const session = { signedIn: true };
+  const responses = {};
+  const page = createPage(session, false, responses);
+  await page.ready();
+  session.signedIn = false;
+  responses.pipeline = () => Response.json({ error: "Authentication required." }, { status: 401 });
+  await assert.rejects(page.request("pipeline"), /Authentication required/);
+  assert.equal(page.element("#dashboard").hidden, true);
+  assert.equal(page.element("#login-panel").hidden, false);
+  assert.match(page.element("#notification").textContent, /session has expired/);
+});
+
+test("a session verification outage reports the error without logging the administrator out", async () => {
+  const responses = {};
+  const page = createPage({ signedIn: true }, false, responses);
+  await page.ready();
+  responses.pipeline = () => Response.json({ error: "Forbidden" }, { status: 403 });
+  responses["auth/session"] = () => Response.json({ error: "Unavailable" }, { status: 502 });
+  await assert.rejects(page.request("pipeline"), /Could not verify administrator session \(HTTP 502\)/);
+  assert.equal(page.element("#dashboard").hidden, false);
+  assert.equal(page.element("#login-panel").hidden, true);
+});
+
+test("queued jobs show waiting, block duplicate runs and report a missing cron worker", async () => {
+  const page = createPage({ signedIn: true }, false, {
+    pipeline: () => Response.json({ job: {
+      id: "queued-id", status: "queued", stage: "reset", startedAt: new Date().toISOString(),
+      steps: { reset: { status: "waiting" } },
+    } }),
+    "pipeline/schedule": () => Response.json({
+      schedule: { frequency: "off", workerConfigured: false },
+    }),
+  });
+  await page.ready();
+  assert.equal(page.element("#scraper-run").disabled, true);
+  assert.equal(page.element("#pipeline-stop").hidden, false);
+  assert.match(page.element("#scraper-result").textContent, /Queued.*No worker is executing/);
+  assert.equal(page.element("#pipeline-time-reset").textContent, "--:--");
+  assert.match(page.element("#pipeline-schedule-status").textContent, /worker is not scheduled/);
+});
+
+test("stop control targets the displayed run and shows cancellation without claiming rollback", async () => {
+  const job = {
+    id: "displayed-job", status: "running", stage: "reset", startedAt: new Date().toISOString(),
+    steps: { reset: { status: "running" } },
+  };
+  const page = createPage({ signedIn: true }, false, {
+    "pipeline/cancel": () => Response.json({ job: {
+      ...job, status: "failed", cancelled: true, steps: { reset: { status: "cancelled" } },
+      error: "Stopped by administrator. Completed changes were not undone.",
+    } }),
+  });
+  await page.ready();
+  page.renderPipeline(job);
+  await page.element("#pipeline-stop").listeners.click();
+  const request = page.calls.find(({ action }) => action === "pipeline/cancel");
+  assert.equal(request.options.method, "POST");
+  assert.deepEqual(JSON.parse(request.options.body), { jobId: job.id });
+  assert.equal(page.element("#pipeline-stop").hidden, false);
+  assert.equal(page.element("#pipeline-stop").disabled, true);
+  assert.equal(page.element("#scraper-run").disabled, false);
+  assert.match(page.element("#scraper-result").textContent, /Completed changes were not undone.*Automatic runs are disabled/);
+});
+
+test("stop remains visible but disabled without an active run", async () => {
+  const page = createPage({ signedIn: true }, false);
+  await page.ready();
+  for (const job of [null, { id: "finished-run", status: "failed", steps: {} }]) {
+    page.renderPipeline(job);
+    assert.equal(page.element("#pipeline-stop").hidden, false);
+    assert.equal(page.element("#pipeline-stop").disabled, true);
+    assert.match(page.element("#pipeline-stop").title, /No queued or running pipeline/);
+    await page.element("#pipeline-stop").listeners.click();
+  }
+  assert.equal(page.calls.some(({ action }) => action === "pipeline/cancel"), false);
+});
+
+test("targeted pipeline failures remain readable in the admin UI", async () => {
+  const page = createPage({ signedIn: true }, false);
+  await page.ready();
+  page.renderPipeline({
+    id: "failed-run", status: "failed", stage: "reset",
+    error: "[MONGODB_PERMISSION_DENIED] MongoDB denied this operation. Grant the database user read/write permissions.",
+    steps: { reset: { status: "failed" } },
+  });
+  assert.match(page.element("#scraper-result").textContent, /MONGODB_PERMISSION_DENIED.*Grant the database user/);
+  assert.equal(page.element("#pipeline-stop").hidden, false);
+  assert.equal(page.element("#pipeline-stop").disabled, true);
+});
+
+test("intentionally stopped workers are neutral while active work and real schedule errors stay visible", async () => {
+  let job = null;
+  const schedule = { frequency: "off", workerConfigured: false };
+  const page = createPage({ signedIn: true }, false, {
+    pipeline: () => Response.json({ job }),
+    "pipeline/schedule": () => Response.json({ schedule }),
+  });
+  await page.ready();
+  const status = page.element("#pipeline-schedule-status");
+  assert.match(status.textContent, /worker is stopped.*Automatic runs are disabled/);
+  assert.equal(status.classList.contains("error"), false);
+  job = { id: "queued-id", status: "queued", steps: {} };
+  await page.runTimers();
+  assert.equal(status.classList.contains("error"), true);
+  assert.match(status.textContent, /worker is not scheduled/);
+  job = null;
+  await page.runTimers();
+  assert.equal(status.classList.contains("error"), false);
+  schedule.frequency = "weekly";
+  await page.runTimers();
+  assert.equal(status.classList.contains("error"), true);
+  schedule.frequency = "off";
+  schedule.lastError = "Gateway dispatch failed.";
+  await page.runTimers();
+  assert.equal(status.textContent, schedule.lastError);
+  assert.equal(status.classList.contains("error"), true);
+  assert.equal(page.calls.some(({ options }) => options.method === "POST"), false);
 });

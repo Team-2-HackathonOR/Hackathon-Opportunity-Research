@@ -1,10 +1,15 @@
-import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from "node:crypto";
-import { db, env, HttpError } from "./runtime.ts";
+import { randomUUID } from "node:crypto";
+import { db, HttpError } from "./runtime.ts";
 import { executeOperation } from "./operation.ts";
+import { encryptKey, decryptKey } from "./pipeline-keys.ts";
+import { pipelineConflict, type Conflict } from "./pipeline-conflicts.ts";
+export { encryptKey, decryptKey } from "./pipeline-keys.ts";
 
 type Step = { status: string; startedAt?: string; finishedAt?: string };
 export type Job = {
   id: string; status: string; stage: string; startedAt: string; finishedAt?: string; error?: string;
+  cancelled?: boolean; executionState?: "waiting" | "executing";
+  stagingBackend?: "supabase-storage";
   reset: Record<string, number>; steps: Record<string, Step>;
   scraper?: { pagesPersisted: number; uniqueHackathonsPersisted: number };
   etl?: { processed: number; inserted: number; failed: number };
@@ -15,26 +20,6 @@ type Row = {
   execution_id: string | null;
 };
 type Schedule = { frequency: string; nextRunAt: string | null; lastTriggeredAt?: string };
-
-function encryptionKey() {
-  const key = Buffer.from(env("PIPELINE_KEY_ENCRYPTION_KEY"), "base64");
-  if (key.length !== 32) throw new HttpError(503, "Pipeline encryption key must decode to 32 bytes.");
-  return key;
-}
-export function encryptKey(value: string, id: string) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
-  cipher.setAAD(Buffer.from(id));
-  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString("base64");
-}
-export function decryptKey(value: string, id: string) {
-  const data = Buffer.from(value, "base64");
-  const cipher = createDecipheriv("aes-256-gcm", encryptionKey(), data.subarray(0, 12));
-  cipher.setAAD(Buffer.from(id));
-  cipher.setAuthTag(data.subarray(12, 28));
-  return Buffer.concat([cipher.update(data.subarray(28)), cipher.final()]).toString("utf8");
-}
 
 const formatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Europe/Rome", year: "numeric", month: "2-digit", day: "2-digit",
@@ -65,25 +50,51 @@ export function nextOccurrence(after: Date, frequency: string, recurring = false
 export async function scheduleView() {
   const [row] = await db()<{ value: Schedule }[]>`SELECT value FROM pipeline_control.schedule WHERE singleton=true`;
   if (!row) throw new HttpError(503, "Apply the pipeline control migration.");
-  return { ...row.value, timeZone: "Europe/Rome", time: "02:00", keyConfigured: !!Deno.env.get("AI_API_KEY")?.trim(), lastError: null };
+  const [worker] = await db()<{ configured: boolean }[]>`SELECT EXISTS (
+    SELECT 1 FROM cron.job WHERE jobname='hackscout-edge-tick' AND active
+  ) AS configured`;
+  return { ...row.value, workerConfigured: worker.configured, timeZone: "Europe/Rome", time: "02:00",
+    keyConfigured: !!Deno.env.get("AI_API_KEY")?.trim(), lastError: null };
 }
 export async function latestJob() {
-  const [row] = await db()<{ job: Job }[]>`SELECT job FROM pipeline_control.jobs ORDER BY created_at DESC LIMIT 1`;
-  return row?.job ?? null;
+  const [row] = await db()<{ job: Job; status: string; executing: boolean }[]>`SELECT job,status,
+    coalesce(execution_until>now(),false) AS executing FROM pipeline_control.jobs ORDER BY created_at DESC LIMIT 1`;
+  return row ? { ...row.job, status: row.status, executionState: row.executing ? "executing" : "waiting" } : null;
+}
+export async function cancelJob(id: string) {
+  const [row] = await db()<{ job: Job | null }[]>`SELECT pipeline_control.cancel_edge_job(${id}::uuid) AS job`;
+  if (!row?.job) throw new HttpError(409, "That Supabase pipeline run is no longer active. Refresh its status.");
+  return row.job;
 }
 
-export async function createJob(key: string, scheduled = false) {
+export async function createJob(key: string, scheduled = false, restartId?: string) {
   return await db().begin(async (sql) => {
     const [row] = await sql<{ value: Schedule }[]>`SELECT value FROM pipeline_control.schedule WHERE singleton=true FOR UPDATE`;
     if (!row) throw new HttpError(503, "Apply the pipeline control migration.");
     if (scheduled && (row.value.frequency === "off" || !row.value.nextRunAt || Date.parse(row.value.nextRunAt) > Date.now())) return null;
-    const active = await sql`SELECT id FROM pipeline_control.jobs WHERE status IN ('queued','running') OR blocked_until>now()`;
-    if (active.length) return null;
+    const [worker] = await sql<{ present: boolean; configured: boolean }[]>`SELECT EXISTS (
+      SELECT 1 FROM cron.job WHERE jobname='hackscout-edge-tick'
+    ) AS present, EXISTS (
+      SELECT 1 FROM cron.job WHERE jobname='hackscout-edge-tick' AND active
+    ) AS configured`;
+    if (!worker.configured) throw new HttpError(503, worker.present
+      ? "Pipeline worker cron hackscout-edge-tick is paused. Re-enable the existing job only when ready for queued cleanup to execute."
+      : "Pipeline worker cron hackscout-edge-tick does not exist. Configure Vault and register this cron job before starting a run.");
+    const conflicts = await sql<Conflict[]>`SELECT j.id,j.status,j.executor,j.blocked_until>now() AS blocked,
+      (SELECT name FROM pipeline_control.operations WHERE job_id=j.id AND status='started' ORDER BY name LIMIT 1) AS operation
+      FROM pipeline_control.jobs j WHERE j.status IN ('queued','running') OR j.blocked_until>now() OR j.id=${restartId ?? null}::uuid
+      ORDER BY j.created_at DESC`;
+    const conflict = pipelineConflict(conflicts, restartId);
+    if (conflict) { if (scheduled) return null; throw conflict; }
+    if (restartId) {
+      const [restart] = await sql<{ ready: boolean }[]>`SELECT pipeline_control.prepare_edge_restart(${restartId}::uuid) AS ready`;
+      if (!restart.ready) throw new HttpError(409, "The pipeline state changed while preparing the restart. Refresh its status and review the current run before retrying.");
+    }
     const id = randomUUID();
     const startedAt = new Date().toISOString();
-    const job: Job = { id, status: "running", stage: "reset", reset: {}, startedAt,
-      steps: { reset: { status: "running", startedAt }, scraper: { status: "waiting" }, etl: { status: "waiting" } },
-      cursor: { phase: "reset-mongodb", page: 1, afterId: null } };
+    const job: Job = { id, status: "queued", stage: "reset", reset: {}, startedAt, stagingBackend: "supabase-storage",
+      steps: { reset: { status: "waiting" }, scraper: { status: "waiting" }, etl: { status: "waiting" } },
+      cursor: { phase: "reset-storage", page: 1, afterId: null } };
     const ciphertext = encryptKey(key, id);
     await sql`INSERT INTO pipeline_control.jobs (id,status,job,key_ciphertext,key_expires_at,executor)
       VALUES (${id},'queued',${sql.json(job)},${ciphertext},now()+interval '24 hours','supabase')`;
@@ -101,7 +112,7 @@ export async function createJob(key: string, scheduled = false) {
 export async function claimJob() {
   const token = randomUUID();
   const [row] = await db()<Row[]>`UPDATE pipeline_control.jobs
-    SET execution_id=${token},execution_until=now()+interval '10 minutes'
+    SET status='running',execution_id=${token},execution_until=now()+interval '10 minutes'
     WHERE id=(SELECT id FROM pipeline_control.jobs WHERE executor='supabase'
       AND status IN ('queued','running') AND (execution_until IS NULL OR execution_until<=now())
       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
@@ -116,7 +127,12 @@ export async function publishJob(row: Row, job: Job) {
     ) THEN 'infinity'::timestamptz ELSE blocked_until END,
     execution_id=NULL,execution_until=NULL
     WHERE id=${row.id} AND execution_id=${row.execution_id} AND status IN ('queued','running') RETURNING id`;
-  if (!updated.length) throw new Error("Pipeline lease was lost before publishing its result.");
+  if (!updated.length) {
+    const [stopped] = await db()<{ cancelled: boolean }[]>`SELECT job->>'cancelled'='true' AS cancelled
+      FROM pipeline_control.jobs WHERE id=${row.id}`;
+    if (stopped?.cancelled) return;
+    throw new Error("Pipeline lease was lost before publishing its result.");
+  }
 }
 export function failedJob(job: Job, message: string): Job {
   job.status = "failed";

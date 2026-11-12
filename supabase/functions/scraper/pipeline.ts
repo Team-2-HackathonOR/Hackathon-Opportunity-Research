@@ -1,6 +1,7 @@
-import { claimJob,createJob,expireJobs,failedJob,latestJob,nextOccurrence,operation,publishJob,rowKey,scheduleView } from "../_shared/pipeline.ts";
-import { db,env,HttpError,json,readJson } from "../_shared/runtime.ts";
+import { cancelJob,claimJob,createJob,expireJobs,failedJob,latestJob,nextOccurrence,operation,publishJob,rowKey,scheduleView } from "../_shared/pipeline.ts";
+import { db,diagnosticError,env,HttpError,json,readJson } from "../_shared/runtime.ts";
 import { handleScraper } from "./service.ts";
+import { serviceJson } from "../_shared/service-errors.ts";
 
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const count = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0;
@@ -8,14 +9,6 @@ type Reset = { reset: true; deletedRecords: number };
 type PgReset = { reset: true; deletedEvents: number };
 type Scrape = { persisted: true; fetchedAt: string; pagesPersisted: number; runUniqueHackathonsPersisted: number; paginationAnalysis: { totalPages: number } };
 type Import = { processed_count: number; inserted_count: number; failed_count: number; next_after_id: number | null };
-
-async function serviceJson(response: Response): Promise<unknown> {
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new HttpError(502, `Pipeline service returned HTTP ${response.status}. Inspect service logs.`);
-  }
-  try { return await response.json(); } catch { throw new HttpError(502, "Pipeline service returned invalid JSON."); }
-}
 
 export async function tick(request: Request) {
   await expireJobs();
@@ -32,7 +25,13 @@ export async function tick(request: Request) {
   if (!row) return json({ ok: true, active: false });
   const job = row.job;
   try {
+    if (job.stagingBackend !== "supabase-storage") throw new HttpError(409, "This job predates Storage staging. Stop it and start a fresh run; old MongoDB operations must not be replayed against Storage.");
     const key = rowKey(row);
+    job.status = "running";
+    if (job.cursor.phase.startsWith("reset-")) {
+      job.steps.reset.status = "running";
+      job.steps.reset.startedAt ??= new Date().toISOString();
+    }
     const timestamp = job.startedAt;
     const invokeScraper = async (path: string, method = "GET") => {
       const target = new URL(request.url);
@@ -47,10 +46,13 @@ export async function tick(request: Request) {
     };
     switch (job.cursor.phase) {
       case "reset-mongodb": {
-        const result = await operation<Reset>(row, "reset-mongodb",
+        throw new HttpError(409, "This run uses retired MongoDB staging. Stop it and start a fresh Storage run; its old operation ledger must not be replayed against Storage.");
+      }
+      case "reset-storage": {
+        const result = await operation<Reset>(row, "reset-storage",
           () => invokeScraper("/hackathons/reset", "POST"),
           (v): v is Reset => record(v) && v.reset === true && count(v.deletedRecords));
-        job.reset.mongodb = result.deletedRecords;
+        job.reset.storage = result.deletedRecords;
         job.cursor.phase = "reset-postgresql";
         break;
       }
@@ -91,7 +93,7 @@ export async function tick(request: Request) {
         job.steps.etl.startedAt ??= new Date().toISOString();
         const afterId = job.cursor.afterId;
         const result = await operation<Import>(row, `etl-${afterId ?? "first"}`, async () => {
-          const target = new URL("/api/internal/etl/etl/import/mongodb", env("AUTH_GATEWAY_URL"));
+          const target = new URL("/api/internal/etl/etl/import/storage", env("AUTH_GATEWAY_URL"));
           if (target.protocol !== "https:" && Deno.env.get("ALLOW_LOCAL_GATEWAY") !== "true") throw new HttpError(503, "Pipeline gateway requires HTTPS.");
           return await serviceJson(await fetch(target, {
             method: "POST", redirect: "error", signal: AbortSignal.timeout(110000),
@@ -106,7 +108,7 @@ export async function tick(request: Request) {
         job.etl = { processed: totals.processed + result.processed_count, inserted: totals.inserted + result.inserted_count, failed: totals.failed + result.failed_count };
         if (result.failed_count) throw new HttpError(502, "An ETL record failed. Successful inserts remain; inspect logs before retrying.");
         if (result.processed_count === 0) {
-          if (job.etl.processed !== job.scraper?.uniqueHackathonsPersisted) throw new HttpError(502, "ETL count does not match the scraped run. Inspect MongoDB configuration.");
+          if (job.etl.processed !== job.scraper?.uniqueHackathonsPersisted) throw new HttpError(502, "ETL count does not match the scraped run. Inspect the Storage staging bucket and run timestamp.");
           job.status = "completed"; job.stage = "done"; job.finishedAt = new Date().toISOString();
           job.steps.etl.status = "completed"; job.steps.etl.finishedAt = job.finishedAt;
         } else job.cursor.afterId = result.next_after_id;
@@ -117,19 +119,32 @@ export async function tick(request: Request) {
     await publishJob(row, job);
   } catch (error) {
     console.error("Pipeline step failed.", { jobId: row.id, phase: job.cursor.phase, kind: error instanceof Error ? error.name : "unknown" });
-    await publishJob(row, failedJob(job, error instanceof HttpError ? error.message
-      : "Pipeline operation could not complete; its outcome may be uncertain. Inspect logs before retrying."));
+    await publishJob(row, failedJob(job, diagnosticError(error)?.message ??
+      "Pipeline operation could not complete; its outcome may be uncertain. Inspect logs before retrying."));
   }
   return json({ ok: true, active: true });
 }
 
 export async function handlePipeline(request: Request, path: string): Promise<Response> {
   if (request.method === "GET" && path === "/pipeline") return json({ job: await latestJob() });
-  if (request.method === "POST" && path === "/pipeline/run") {
+  if (request.method === "POST" && path === "/pipeline/cancel") {
+    const payload = await readJson(request);
+    if (!record(payload) || typeof payload.jobId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.jobId)) {
+      throw new HttpError(400, "Choose a valid pipeline run to stop.");
+    }
+    return json({ job: await cancelJob(payload.jobId) });
+  }
+  if (request.method === "POST" && (path === "/pipeline/run" || path === "/pipeline/restart")) {
     const payload = await readJson(request);
     if (!record(payload) || typeof payload.apiKey !== "string" || !payload.apiKey.trim() || payload.apiKey.length > 4096) throw new HttpError(400, "Enter a valid AI API key.");
-    const job = await createJob(payload.apiKey.trim());
-    if (!job) throw new HttpError(409, "A pipeline run is already active or blocked because an operation has an uncertain outcome. Inspect logs before retrying.");
+    const restarting = path === "/pipeline/restart";
+    if (restarting && (typeof payload.jobId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.jobId))) {
+      throw new HttpError(400, "Choose a valid pipeline run to reset.");
+    }
+    const job = await createJob(payload.apiKey.trim(), false, restarting ? String(payload.jobId) : undefined);
+    if (!job) throw new HttpError(409, "No new pipeline run was queued. Refresh the pipeline status before trying again.");
     return json({ job }, 202);
   }
   if (request.method === "GET" && path === "/schedule") return json({ schedule: await scheduleView() });

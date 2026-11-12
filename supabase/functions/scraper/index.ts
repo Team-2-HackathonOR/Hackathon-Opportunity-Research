@@ -9,6 +9,9 @@ export async function handleRequest(request: Request): Promise<Response> {
     if (path === "/pipeline/schedule") path = "/schedule";
     if (path === "/schedule" || path === "/pipeline" || path.startsWith("/pipeline/")) {
       const hasUser = request.headers.has("x-user-id") || request.headers.has("x-user-role");
+      if (["/pipeline/cancel", "/pipeline/restart"].includes(path) && request.headers.get("x-user-role") !== "admin") {
+        return Response.json({ error: "An administrator role is required." }, { status: 403 });
+      }
       if (hasUser && (path === "/pipeline/tick" || request.headers.get("x-user-role") !== "admin")) {
         return Response.json({ error: "Internal pipeline access is required." }, { status: 403 });
       }

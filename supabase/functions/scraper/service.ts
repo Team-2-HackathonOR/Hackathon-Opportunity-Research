@@ -1,6 +1,7 @@
 import { json } from '../_shared/runtime.ts';
+import { StorageError,storageFailure } from '../_shared/service-errors.ts';
 import { parsePositiveInteger } from '../_shared/scraper/parsing.ts';
-import { bounded,buildDevpostUrl,defaults,Dependencies,loadPage,mapHackathon,MAX_CACHE_ITEMS,persist,validPipelineTimestamp } from './scraper-io.ts';
+import { buildDevpostUrl,defaults,Dependencies,loadPage,mapHackathon,MAX_CACHE_ITEMS,persist,validPipelineTimestamp } from './scraper-io.ts';
 
 export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
   const deps = { ...defaults, ...overrides };
@@ -18,22 +19,18 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
         return json({ error: 'Database resets require an internal pipeline caller.' }, 403);
       }
       try {
-        const result = await bounded((async () => (await deps.collection()).deleteMany({}, { maxTimeMS: 15000 }))());
-        return json({ reset: true, deletedRecords: result.deletedCount });
-      } catch {
-        return json({ error: 'Failed to reset scraper records.' }, 500);
+        return json({ reset: true, deletedRecords: await deps.store.reset() });
+      } catch (error) {
+        return json(storageFailure(error), 500);
       }
     }
     if (request.method === 'GET' && (path === '/hackathons/cache' || path === '/hackathons/cached')) {
       try {
-        const documents = await bounded((async () => (await deps.collection())
-          .find({}, { projection: { _id: 0 }, maxTimeMS: 15000 })
-          .limit(MAX_CACHE_ITEMS + 1).toArray())());
-        if (documents.length > MAX_CACHE_ITEMS) throw new Error('Cache exceeds the response limit.');
+        const documents = await deps.store.read(null, null, MAX_CACHE_ITEMS);
         documents.sort((left, right) => String(left.title).localeCompare(String(right.title)));
         return json({ fetchedAt: deps.now(), total: documents.length, hackathons: documents });
-      } catch {
-        return json({ error: 'Failed to read cached hackathons from MongoDB.' }, 500);
+      } catch (error) {
+        return json(storageFailure(error), 500);
       }
     }
     if (request.method !== 'GET' || (path !== '/hackathons' && path !== '/hackathons/persist-all')) {
@@ -72,21 +69,21 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
       if (batch && startPage > paginationAnalysis.totalPages!) {
         return json({ error: 'Requested start page is outside the available Devpost page range.', requestedStartPage: startPage, totalPages: paginationAnalysis.totalPages }, 400);
       }
-      const persistToMongoDb = batch || query.getAll('persist').some((value) => ['1', 'true', 'yes'].includes(value.toLowerCase()));
-      if (persistToMongoDb) {
+      const persistToStorage = batch || query.getAll('persist').some((value) => ['1', 'true', 'yes'].includes(value.toLowerCase()));
+      if (persistToStorage) {
         try {
           await persist(deps, hackathons, sourceUrl, fetchedAt);
-        } catch {
-          if (!batch) return json({ error: 'Hackathons were scraped but could not be persisted to MongoDB.', sourceUrl }, 500);
-          return json({ error: 'Batch persistence stopped because MongoDB persistence failed.', sourceUrl,
+        } catch (error) {
+          if (!batch) return json({ ...storageFailure(error), sourceUrl }, 500);
+          return json({ ...storageFailure(error), sourceUrl,
             requestedStartPage: startPage, requestedMaxPages: 1, attemptedPage: startPage,
             lastSuccessfulPage: startPage - 1, pagesRequested: 1, pagesPersisted: 0,
             hackathonsPersisted: 0, uniqueHackathonsPersisted: 0, paginationAnalysis }, 500);
         }
       }
-      if (!batch) return json({ sourceUrl, fetchedAt, total: hackathons.length, paginationAnalysis, persisted: persistToMongoDb, hackathons });
+      if (!batch) return json({ sourceUrl, fetchedAt, total: hackathons.length, paginationAnalysis, persisted: persistToStorage, hackathons });
       const runUniqueHackathonsPersisted = timestamp
-        ? await bounded((async () => (await deps.collection()).countDocuments({ fetchedAt }, { maxTimeMS: 15000 }))())
+        ? await deps.store.count(fetchedAt)
         : undefined;
       return json({
         sourceUrl, fetchedAt, requestedStartPage: startPage, requestedMaxPages: 1,
@@ -95,8 +92,10 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
         ...(timestamp ? { runUniqueHackathonsPersisted } : {}), paginationAnalysis, persisted: true,
         cacheEndpoint: '/hackathons/cache',
       });
-    } catch {
-      return json({ error: batch ? 'Unexpected error while persisting all Devpost hackathons.' : 'Unexpected error while scraping Devpost.', sourceUrl }, 500);
+    } catch (error) {
+      if (error instanceof StorageError) return json({ ...storageFailure(error), sourceUrl }, 500);
+      console.error("Scraper request failed.", { kind: error instanceof Error ? error.name : "unknown" });
+      return json({ error: batch ? "Unexpected error while persisting a Devpost page." : "Unexpected error while scraping Devpost.", sourceUrl }, 500);
     }
   };
 }

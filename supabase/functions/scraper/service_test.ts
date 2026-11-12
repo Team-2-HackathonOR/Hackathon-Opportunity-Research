@@ -1,5 +1,6 @@
-import { MongoClient } from "npm:mongodb@6.21.0";
 import type { DevpostHackathon } from "../_shared/scraper/models.ts";
+import type { StagingStore, StagedRecord } from "../_shared/staging-storage.ts";
+import { StorageError } from "../_shared/service-errors.ts";
 import { buildDevpostUrl,mapHackathon } from "./scraper-io.ts";
 import { createScraperHandler } from "./service.ts";
 
@@ -14,6 +15,10 @@ const sample: DevpostHackathon = {
   submission_gallery_url: "https://event.test/gallery", start_a_submission_url: "https://event.test/register",
   invite_only: false, managed_by_devpost_badge: true, themes: [{ id: 1, name: "AI" }],
 };
+const emptyStore: StagingStore = {
+  persist: () => Promise.resolve(), read: () => Promise.resolve([]),
+  count: () => Promise.resolve(0), reset: () => Promise.resolve(0),
+};
 
 Deno.test("scraper preserves source mapping and strips only control query parameters", () => {
   const mapped = mapHackathon(sample);
@@ -24,33 +29,15 @@ Deno.test("scraper preserves source mapping and strips only control query parame
   assert(!url.searchParams.has("maxPages") && url.searchParams.getAll("search").length === 2, "Filters were not preserved.");
 });
 
-Deno.test("bounded scraper rejects unbounded work before I/O and reports exact run acknowledgement", async () => {
-  const client = new MongoClient("mongodb://127.0.0.1:1");
-  const collection = client.db("fixture").collection("hackathons");
-  let writes = 0;
-  let timestamp: unknown;
+Deno.test("bounded scraper persists run metadata to Storage and reports exact run acknowledgement", async () => {
+  let written: StagedRecord[] = [];
   let pages = 0;
-  Object.defineProperty(collection, "bulkWrite", { value: (operations: unknown[]) => {
-    const operation = operations[0];
-    if (typeof operation === "object" && operation !== null && "updateOne" in operation) {
-      const update = operation.updateOne;
-      if (typeof update === "object" && update !== null && "update" in update) {
-        const doc = update.update;
-        if (typeof doc === "object" && doc !== null && "$set" in doc) {
-          const value = doc.$set;
-          if (typeof value === "object" && value !== null && "fetchedAt" in value) timestamp = value.fetchedAt;
-        }
-      }
-    }
-    writes += operations.length;
-    return Promise.resolve({});
-  } });
-  Object.defineProperty(collection, "countDocuments", { value: (filter: { fetchedAt: string }) => {
-    assert(filter.fetchedAt === timestamp, "Run count queried a different timestamp.");
-    return Promise.resolve(writes);
-  } });
+  const fetchedAt = "2026-11-12T10:00:00.000Z";
   const handler = createScraperHandler({
-    collection: () => Promise.resolve(collection),
+    store: { ...emptyStore,
+      persist: (records) => { written = records; return Promise.resolve(); },
+      count: (timestamp) => { assert(timestamp === fetchedAt, "Count lost the run timestamp."); return Promise.resolve(written.length); },
+    },
     page: () => {
       pages++;
       return Promise.resolve({ ok: true, statusCode: 200, body: { hackathons: [sample], meta: { total_pages: 2 } } });
@@ -62,13 +49,27 @@ Deno.test("bounded scraper rejects unbounded work before I/O and reports exact r
   });
   const path = "/hackathons/persist-all";
   assert((await handler(new Request(`https://example.test${path}`), path)).status === 400, "Unbounded crawl accepted.");
-  assert(pages === 0 && writes === 0, "Invalid request performed I/O.");
-  const fetchedAt = "2026-11-12T10:00:00.000Z";
+  assert(pages === 0 && written.length === 0, "Invalid request performed I/O.");
   const response = await handler(new Request(`https://example.test${path}?startPage=1&maxPages=1`, {
     headers: { "x-pipeline-fetched-at": fetchedAt },
   }), path);
   const result = await response.json();
   assert(response.status === 200 && result.runUniqueHackathonsPersisted === 1 && result.pagesPersisted === 1, "Incorrect durable batch summary.");
-  assert(timestamp === fetchedAt, "Batch did not reuse the run timestamp.");
-  await client.close();
+  assert(written[0].fetchedAt === fetchedAt && written[0].sourceUrl !== undefined, "Stored record lost provenance.");
+});
+
+Deno.test("Storage cleanup stays internal and returns safe diagnostics without fake acknowledgement", async () => {
+  let resets = 0;
+  const handler = createScraperHandler({ store: { ...emptyStore, reset: () => {
+    resets++;
+    return Promise.reject(new StorageError("STORAGE_BUCKET_MISSING", 404));
+  } } });
+  const path = "/hackathons/reset";
+  const denied = await handler(new Request(`https://example.test${path}`, {
+    method: "POST", headers: { "x-user-role": "admin" },
+  }), path);
+  assert(denied.status === 403 && resets === 0, "Browser caller could reset Storage.");
+  const failed = await handler(new Request(`https://example.test${path}`, { method: "POST" }), path);
+  const result = await failed.json();
+  assert(failed.status === 500 && result.code === "STORAGE_BUCKET_MISSING" && !result.reset, "Reset failure looked successful.");
 });

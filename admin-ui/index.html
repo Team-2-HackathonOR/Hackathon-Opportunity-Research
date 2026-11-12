@@ -10,6 +10,7 @@
     <script src="admin-queue.js" defer></script>
     <script src="admin-auth.js" defer></script>
     <script src="admin-pipeline.js" defer></script>
+    <script src="admin-pipeline-stop.js" defer></script>
     <script src="admin-events.js" defer></script>
   </head>
   <body>
@@ -42,21 +43,25 @@
         <section class="panel scraper-panel" aria-labelledby="scraper-title">
           <p class="eyebrow">DATA COLLECTION</p>
           <h2 id="scraper-title">Run the full data pipeline</h2>
-          <p>Every manual and automatic run permanently clears scraper records and event listings before scraping Devpost and importing with AI. Accounts, suggestions/review history, categories and team members are preserved; deleted listings are unlinked from reviews. A failed run can leave databases empty or partially filled. The API key is used only for this run and is not saved.</p>
+          <p>Every manual and automatic Edge run permanently clears its Supabase Storage staging records and event listings before scraping Devpost and importing with AI. Accounts, suggestions/review history, categories and team members are preserved; deleted listings are unlinked from reviews. A failed run can leave staging or listings empty or partially filled. The API key is used only for this run and is not saved.</p>
           <form id="scraper-form">
             <label>AI API key<input id="scraper-api-key" type="password" autocomplete="off" spellcheck="false" required maxlength="4096" /></label>
             <div class="review-actions"><button id="scraper-run" class="primary" type="submit">Run scraper and ETL</button></div>
           </form>
+          <button id="pipeline-stop" class="danger" type="button" disabled title="No queued or running pipeline to stop." aria-describedby="pipeline-stop-help">Stop pipeline</button>
+          <button id="pipeline-reset" class="danger" type="button" hidden>Reset &amp; restart</button>
+          <p id="pipeline-stop-help" class="hint">Stopping disables automatic runs and prevents further steps. An operation already executing may finish; completed deletions cannot be undone.</p>
+          <p class="hint">Reset &amp; restart requires a new API key above and confirmation. It queues a fresh cleanup, scrape and ETL run and disables automatic runs; it never bypasses an uncertain-operation interlock.</p>
           <section id="pipeline-progress" class="pipeline-progress" aria-label="Pipeline progress" hidden>
             <ol class="pipeline-steps">
               <li id="pipeline-step-reset" class="pipeline-step" data-status="waiting">
                 <span class="pipeline-marker">1</span>
-                <div class="pipeline-step-copy"><strong>Reset databases</strong><span>Delete scraper records and event listings</span><span id="pipeline-status-reset">Waiting</span></div>
+                <div class="pipeline-step-copy"><strong>Reset staging and listings</strong><span>Delete staging records and event listings</span><span id="pipeline-status-reset">Waiting</span></div>
                 <span id="pipeline-time-reset" class="pipeline-time" aria-label="Reset elapsed time">00:00</span>
               </li>
               <li id="pipeline-step-scraper" class="pipeline-step" data-status="waiting">
                 <span class="pipeline-marker" aria-hidden="true">2</span>
-                <div class="pipeline-step-copy"><strong>Scraper</strong><span>Devpost to MongoDB</span><span id="pipeline-status-scraper">Waiting</span></div>
+                <div class="pipeline-step-copy"><strong>Scraper</strong><span>Devpost to Supabase Storage</span><span id="pipeline-status-scraper">Waiting</span></div>
                 <span id="pipeline-time-scraper" class="pipeline-time" aria-label="Scraper elapsed time">00:00</span>
               </li>
               <li id="pipeline-step-etl" class="pipeline-step" data-status="waiting">
@@ -65,7 +70,7 @@
                 <span id="pipeline-time-etl" class="pipeline-time" aria-label="ETL elapsed time">00:00</span>
               </li>
             </ol>
-            <p class="hint">Total elapsed: <span id="pipeline-time-total" class="pipeline-time">00:00</span>. Activity animation indicates work in progress, not percentage completed.</p>
+            <p class="hint">Total elapsed: <span id="pipeline-time-total" class="pipeline-time">00:00</span>, including queue time. Supabase advances one step per cron tick; waiting does not mean deletion is executing.</p>
           </section>
           <p id="scraper-result" role="status" aria-live="polite"></p>
           <form id="pipeline-schedule-form" class="pipeline-schedule-form">

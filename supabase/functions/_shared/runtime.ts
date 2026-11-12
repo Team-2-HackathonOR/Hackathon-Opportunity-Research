@@ -1,6 +1,6 @@
+import "./node-compat.ts";
 import { timingSafeEqual } from "node:crypto";
 import postgres from "npm:postgres@3.4.7";
-import { MongoClient, type Collection, type Document } from "npm:mongodb@6.21.0";
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -32,9 +32,32 @@ export function json(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { "cache-control": "no-store" } });
 }
 
+export function diagnosticError(error: unknown): HttpError | undefined {
+  if (error instanceof HttpError) return error;
+  if (!(error instanceof Error) || error.name !== "PostgresError" || !("code" in error) ||
+      typeof error.code !== "string") return;
+  const messages: Record<string, string> = {
+    "28P01": "PostgreSQL authentication failed. Check the database credentials in EDGE_DATABASE_URL.",
+    "42501": "PostgreSQL permission denied. Check the Edge database role's access to pipeline_control, cron and the research tables.",
+    "42P01": "A required PostgreSQL table is missing. Apply the application and pipeline control migrations to the configured database.",
+    "42883": "A required PostgreSQL function is missing. Apply the pending pipeline control migrations.",
+    "53300": "PostgreSQL connection capacity is exhausted. Check the transaction pooler and active database connections.",
+    "57014": "PostgreSQL cancelled or timed out the operation. For reset failures, verify its outcome before retrying.",
+    "55P03": "PostgreSQL could not acquire a database lock. Inspect concurrent database work before retrying.",
+  };
+  if (Object.hasOwn(messages, error.code)) return new HttpError(503, messages[error.code]);
+}
+
 export function safeError(error: unknown): Response {
+  error = diagnosticError(error) ?? error;
   const status = error instanceof HttpError ? error.status : 503;
-  console.error("Edge request failed.", { kind: error instanceof Error ? error.name : "unknown", status });
+  const reference = error instanceof ReferenceError
+    ? /^([A-Za-z_$][\w$]*) is not defined$/.exec(error.message)?.[1]
+    : undefined;
+  console.error("Edge request failed.", {
+    kind: error instanceof Error ? error.name : "unknown", status,
+    ...(reference ? { reference } : {}),
+  });
   return json({ error: error instanceof HttpError ? error.message : "The service could not complete this request. Check its logs." }, status);
 }
 
@@ -49,23 +72,6 @@ export function db(): ReturnType<typeof postgres> {
     });
   }
   return sql;
-}
-
-let mongo: Promise<MongoClient> | undefined;
-export async function mongoCollection(databaseName?: string | null, collectionName?: string | null): Promise<Collection<Document>> {
-  if (!mongo) {
-    const client = new MongoClient(env("MONGODB_URI"), {
-      maxPoolSize: 2, serverSelectionTimeoutMS: 10000, connectTimeoutMS: 10000, socketTimeoutMS: 20000,
-    });
-    mongo = client.connect().catch(async (error: unknown) => {
-      mongo = undefined;
-      await client.close();
-      throw error;
-    });
-  }
-  const client = await mongo;
-  return client.db(databaseName?.trim() || Deno.env.get("MONGODB_DATABASE")?.trim() || "hackathon-opportunity-research")
-    .collection(collectionName?.trim() || Deno.env.get("MONGODB_COLLECTION")?.trim() || "hackathons");
 }
 
 export function functionPath(request: Request, name: string): string {

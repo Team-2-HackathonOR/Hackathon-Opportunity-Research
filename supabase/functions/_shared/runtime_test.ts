@@ -1,4 +1,4 @@
-import { authorize, HttpError } from "./runtime.ts";
+import { authorize, HttpError, safeError } from "./runtime.ts";
 
 function assert(value: boolean, message: string) {
   if (!value) throw new Error(message);
@@ -32,5 +32,23 @@ Deno.test("all direct callers are denied, including spoofed gateway names and br
   } finally {
     if (previous === undefined) Deno.env.delete("GATEWAY_INTERNAL_SECRET");
     else Deno.env.set("GATEWAY_INTERNAL_SECRET", previous);
+  }
+});
+
+Deno.test("reference errors log only a missing symbol, never arbitrary exception details", async () => {
+  const original = console.error;
+  const entries: unknown[][] = [];
+  console.error = (...args: unknown[]) => { entries.push(args); };
+  try {
+    const response = safeError(new ReferenceError("MissingRuntimeSymbol is not defined"));
+    assert(response.status === 503, "Unexpected error status.");
+    assert(!JSON.stringify(await response.json()).includes("MissingRuntimeSymbol"), "Client saw internal details.");
+    assert(JSON.stringify(entries[0]).includes('"reference":"MissingRuntimeSymbol"'), "Missing symbol was not logged.");
+    safeError(new ReferenceError("postgresql://private:password@database.example/internal"));
+    safeError(new Error("provider-secret-fixture"));
+    assert(!JSON.stringify(entries).includes("password"), "Database credentials were logged.");
+    assert(!JSON.stringify(entries).includes("provider-secret-fixture"), "Provider secret was logged.");
+  } finally {
+    console.error = original;
   }
 });

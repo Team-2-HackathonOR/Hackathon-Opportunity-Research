@@ -1,7 +1,9 @@
 import { parse as parseCsv } from "npm:csv-parse@6.1.0/sync";
 import { ZodError } from "npm:zod@3.25.76";
-import { authorize, HttpError, json, mongoCollection, readJson, safeError } from "../_shared/runtime.ts";
-import { eventSchema, mongoImportSchema, type RawRecord } from "../_shared/etl/schema.ts";
+import { authorize, HttpError, json, readJson, safeError } from "../_shared/runtime.ts";
+import { stagingStore,type StagingStore } from "../_shared/staging-storage.ts";
+import { StorageError,storageFailure } from "../_shared/service-errors.ts";
+import { eventSchema, storageImportSchema, type RawRecord } from "../_shared/etl/schema.ts";
 import { buildBaseEvent } from "../_shared/etl/normalization-base.ts";
 import { normalizeWithAi } from "../_shared/etl/normalization.ts";
 import { createEvent, createTeamMember } from "../_shared/etl/writer.ts";
@@ -62,7 +64,10 @@ async function importRecords(records: RawRecord[], source: string, useAi: boolea
   return { source, processed_count: records.length, inserted_count: successes.length, failed_count: failures.length, successes, failures, next_after_id: null as number | null };
 }
 
-export async function handleETL(request: Request): Promise<Response> {
+export function createETLHandler(overrides: { store?: StagingStore; importer?: typeof importRecords } = {}) {
+  const store = overrides.store ?? stagingStore;
+  const importer = overrides.importer ?? importRecords;
+  return async (request: Request): Promise<Response> => {
   try {
     authorize(request);
     const path = etlPath(request.url);
@@ -72,23 +77,16 @@ export async function handleETL(request: Request): Promise<Response> {
     if (apiKey.length > 4096) throw new HttpError(400, "The AI API key is too long.");
     if (path === "/events") return json(await createEvent(eventSchema.parse(await readJson(request, 1_000_000))), 201);
     if (path === "/team-members") return json(await createTeamMember(await readJson(request)), 201);
-    if (path === "/etl/import/mongodb") {
-      const payload = mongoImportSchema.parse(await readJson(request));
+    if (path === "/etl/import/storage" || path === "/etl/import/mongodb") {
+      const payload = storageImportSchema.parse(await readJson(request));
+      if (payload.database_name || payload.collection_name) throw new HttpError(400, "MongoDB database/collection overrides are retired. Staging uses the server-configured private Storage bucket and prefix.");
       if (payload.after_id !== null && !payload.cursor_mode) throw new HttpError(400, "after_id requires cursor_mode.");
       if (payload.limit === null && !payload.fetched_at) throw new HttpError(400, "An unlimited import requires a scraper fetched_at timestamp.");
       if (payload.cursor_mode && (!payload.fetched_at || payload.limit !== 1)) throw new HttpError(400, "Cursor imports require fetched_at and a one-record limit.");
       const max = payload.use_ai_normalization ? 1 : 25;
-      if (payload.limit === null || payload.limit > max) throw new HttpError(400, `Edge MongoDB imports require limit <= ${max}. Use cursor_mode for a full run.`);
-      const filter = {
-        ...(payload.fetched_at ? { fetchedAt: payload.fetched_at } : {}),
-        ...(payload.after_id !== null ? { id: { $gt: payload.after_id } } : {}),
-      };
-      const cursor = (await mongoCollection(payload.database_name, payload.collection_name))
-        .find(filter, { projection: { _id: 0 }, maxTimeMS: 15000 });
-      if (payload.cursor_mode) cursor.sort({ id: 1 });
-      const records = await cursor.limit(payload.limit).toArray();
-      if (payload.cursor_mode && records.some((v) => !Number.isSafeInteger(v.id) || v.id < 0)) throw new HttpError(422, "Cursor imports require non-negative numeric source IDs.");
-      const result = await importRecords(records, "mongodb", payload.use_ai_normalization, apiKey, payload.primary_researcher_id, payload.verifier_id);
+      if (payload.limit === null || payload.limit > max) throw new HttpError(400, `Edge Storage imports require limit <= ${max}. Use cursor_mode for a full run.`);
+      const records = await store.read(payload.fetched_at, payload.after_id, payload.limit);
+      const result = await importer(records, "storage", payload.use_ai_normalization, apiKey, payload.primary_researcher_id, payload.verifier_id);
       if (payload.cursor_mode && records.length) result.next_after_id = records[records.length - 1].id;
       return json(result);
     }
@@ -121,18 +119,21 @@ export async function handleETL(request: Request): Promise<Response> {
         if (value === null || value === "") return null;
         if (typeof value !== "string" || !/^-?\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new HttpError(422, "Invalid team member ID.");
         return Number(value);
-      };
-      return json(await importRecords(parseRecords(file.name, await file.text()), file.name, useAi, apiKey,
+       };
+      return json(await importer(parseRecords(file.name, await file.text()), file.name, useAi, apiKey,
         member("primary_researcher_id"), member("verifier_id")));
     }
     throw new HttpError(404, "Unknown ETL route.");
   } catch (error) {
+    if (error instanceof StorageError) return json(storageFailure(error), error.status);
     if (error instanceof ZodError) {
       console.warn("ETL request validation failed.");
       return json({ detail: "Request does not satisfy the ETL schema.", errors: error.issues.map((v) => ({ path: v.path, message: v.message })) }, 422);
     }
     return safeError(error);
   }
+ };
 }
 
+export const handleETL = createETLHandler();
 if (import.meta.main) Deno.serve(handleETL);

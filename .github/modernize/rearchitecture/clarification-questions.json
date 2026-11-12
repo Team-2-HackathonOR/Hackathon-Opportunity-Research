@@ -1,0 +1,220 @@
+{
+  "schema": "clarification-questions/v1",
+  "generated_at": "2026-11-12T21:27:50Z",
+  "user_input": "instead of using a mongodb database I want to use a s3 bucket\nSupabase storage",
+  "title": "Replace MongoDB staging with Supabase Storage",
+  "assessment_snapshot": {
+    "intro": "The active pipeline can use a private Supabase Storage bucket instead of MongoDB; a few migration choices need confirmation.",
+    "bullets": [
+      "Supabase Storage is the selected provider; no AWS account is required.",
+      "The Edge scraper writes staging records and the Edge ETL reads them. PostgreSQL still stores final listings and pipeline control state.",
+      "Legacy Node scraper and Python ETL implementations also exist; their inclusion needs a scope decision.",
+      "Existing MongoDB data will not be deleted or copied without the selected migration policy.",
+      "Gateway authentication, cancellation safety and the 200-line code-file limit must remain intact."
+    ]
+  },
+  "proposed_outcome": "Replace MongoDB staging with private JSON objects in Supabase Storage, keep PostgreSQL for final listings and durable orchestration, preserve the gateway-only application entry points, and verify scraper-to-ETL behavior with focused tests. Do not deploy, start a pipeline, provision cloud resources or delete existing data during implementation.",
+  "scope": [
+    "backend",
+    "generic"
+  ],
+  "status": "awaiting_answers",
+  "questions": [
+    {
+      "id": "B1",
+      "kit": "backend",
+      "field": "target.framework",
+      "title": "Confirmed storage target",
+      "question": "Confirm the target runtime and storage provider.",
+      "importance": "required",
+      "impact": 5,
+      "recommended": null,
+      "default": null,
+      "prefilled": true,
+      "prefilled_value": "Keep the existing Deno 2 Supabase Edge Functions; replace MongoDB staging with a private Supabase Storage bucket. Keep PostgreSQL for final listings and pipeline state.",
+      "answer": null,
+      "depends_on": null,
+      "type": "text"
+    },
+    {
+      "id": "B2",
+      "kit": "backend",
+      "field": "api.contract_preservation",
+      "title": "API compatibility",
+      "question": "Which API contracts should remain unchanged while MongoDB imports become Storage imports?",
+      "importance": "required",
+      "impact": 4,
+      "recommended": "partial: preserve browser/admin gateway APIs; update internal storage import routes and dependent gateway callers together",
+      "default": "must preserve",
+      "prefilled": false,
+      "prefilled_value": null,
+      "answer": null,
+      "depends_on": null,
+      "options": [
+        {
+          "value": "partial: preserve browser/admin gateway APIs; update internal storage import routes and dependent gateway callers together",
+          "label": "Preserve browser/admin APIs; update internal import routes together"
+        },
+        {
+          "value": "must preserve",
+          "label": "Preserve all routes and payloads, including legacy MongoDB-named APIs"
+        },
+        {
+          "value": "can break with versioning",
+          "label": "Allow versioned API changes"
+        }
+      ],
+      "allow_other": true,
+      "type": "single_select"
+    },
+    {
+      "id": "B3",
+      "kit": "backend",
+      "field": "data.migration_strategy",
+      "title": "Existing MongoDB records",
+      "question": "Should the new bucket start empty, or should existing MongoDB staging records be copied?",
+      "importance": "required",
+      "impact": 5,
+      "recommended": "new schema: start with an empty private bucket; leave existing MongoDB data untouched",
+      "default": "TBD / assess in research phase",
+      "prefilled": false,
+      "prefilled_value": null,
+      "answer": null,
+      "depends_on": null,
+      "options": [
+        {
+          "value": "new schema: start with an empty private bucket; leave existing MongoDB data untouched",
+          "label": "Start fresh in Storage; leave MongoDB untouched"
+        },
+        {
+          "value": "new schema: copy existing MongoDB staging records into Storage without deleting the source",
+          "label": "Copy existing MongoDB records; preserve the source"
+        },
+        {
+          "value": "TBD / assess in research phase",
+          "label": "Assess migration requirements before implementing"
+        }
+      ],
+      "allow_other": true,
+      "type": "single_select"
+    },
+    {
+      "id": "B4",
+      "kit": "backend",
+      "field": "auth.framework",
+      "title": "Access control",
+      "question": "Confirm the existing authentication boundary and private bucket access.",
+      "importance": "recommended",
+      "impact": 5,
+      "recommended": null,
+      "default": "preserve existing auth mechanism; detect from codebase",
+      "prefilled": true,
+      "prefilled_value": "Preserve gateway shared-secret authentication, admin-only pipeline controls and HttpOnly administrator sessions. Keep the bucket private and Storage credentials server-side; never expose keys in the browser.",
+      "answer": null,
+      "depends_on": null,
+      "type": "text"
+    },
+    {
+      "id": "B5",
+      "kit": "backend",
+      "field": "nfr.sla",
+      "title": "Performance and cost constraints",
+      "question": "Keep existing bounded work per tick, or specify different measurable limits?",
+      "importance": "recommended",
+      "impact": 3,
+      "recommended": null,
+      "default": "match current production baseline; no regression",
+      "prefilled": false,
+      "prefilled_value": null,
+      "answer": null,
+      "depends_on": null,
+      "type": "text"
+    },
+    {
+      "id": "G1",
+      "kit": "generic",
+      "field": "success.definition",
+      "title": "Definition of done",
+      "question": "Confirm the expected result.",
+      "importance": "required",
+      "impact": 5,
+      "recommended": null,
+      "default": "feature parity with the current system; all existing user-facing behaviors preserved",
+      "prefilled": true,
+      "prefilled_value": "The selected scraper/ETL implementations use Supabase Storage instead of MongoDB for staging, and the active Edge pipeline can reset its own staging objects, scrape, and import final listings into PostgreSQL with existing stop/interlock protections. Targeted tests and typechecks pass without starting a production run.",
+      "answer": null,
+      "depends_on": null,
+      "type": "text"
+    },
+    {
+      "id": "G2",
+      "kit": "generic",
+      "field": "out_of_scope",
+      "title": "Implementations to update",
+      "question": "Replace MongoDB only in the active Edge pipeline, or also in the legacy standalone services?",
+      "importance": "recommended",
+      "impact": 5,
+      "recommended": "Update active Supabase Edge scraper and ETL plus dependent gateway/admin contracts and docs; exclude standalone Node/Python services",
+      "default": "no explicit exclusions; agent will infer from project structure",
+      "prefilled": false,
+      "prefilled_value": null,
+      "answer": null,
+      "depends_on": null,
+      "options": [
+        {
+          "value": "Update active Supabase Edge scraper and ETL plus dependent gateway/admin contracts and docs; exclude standalone Node/Python services",
+          "label": "Active Supabase Edge pipeline only"
+        },
+        {
+          "value": "Update Edge functions and standalone Node scraper/Python ETL plus directly dependent callers and docs",
+          "label": "All scraper and ETL implementations"
+        }
+      ],
+      "allow_other": true,
+      "type": "single_select"
+    },
+    {
+      "id": "G3",
+      "kit": "generic",
+      "field": "existing_tests.posture",
+      "title": "Test policy",
+      "question": "How should existing tests be handled?",
+      "importance": "recommended",
+      "impact": 3,
+      "recommended": "must pass",
+      "default": "must pass",
+      "prefilled": false,
+      "prefilled_value": null,
+      "answer": null,
+      "depends_on": null,
+      "options": [
+        {
+          "value": "must pass",
+          "label": "Preserve existing behavior; adapt storage-specific fixtures and keep tests passing"
+        },
+        {
+          "value": "can rewrite",
+          "label": "Replace storage-specific tests with equivalent coverage"
+        }
+      ],
+      "allow_other": true,
+      "type": "single_select"
+    },
+    {
+      "id": "G5",
+      "kit": "generic",
+      "field": "constraints.additional",
+      "title": "Additional constraints",
+      "question": "Add any requirements, exclusions or existing bucket name. Do not enter credentials.",
+      "importance": "optional",
+      "impact": 3,
+      "recommended": null,
+      "default": "None beyond the decisions listed in this specification.",
+      "prefilled": true,
+      "prefilled_value": "Keep every code file at 200 lines or fewer. Make targeted changes in the current repository. Do not deploy, run destructive operations, enable cron or provision paid resources. Use a private bucket with a configurable staging prefix; cleanup must never delete unrelated bucket objects. Do not store credentials in source or clarification artifacts.",
+      "answer": null,
+      "depends_on": null,
+      "type": "text"
+    }
+  ]
+}

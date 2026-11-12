@@ -67,7 +67,10 @@ pre-approved local admin with no password gets a first-password creation form,
 matching Codyza Weather. No public admin registration or role selection is
 available. Admin sessions use an HttpOnly, SameSite cookie (Secure in production)
 until JWT expiry or sign-out and survive page reloads. Public user sessions remain
-in page memory. **First-password setup intentionally follows Weather's
+in page memory. If a protected API returns 401 or 403, the admin UI checks the
+dedicated session endpoint before signing out. Pipeline authorization failures
+and session-service outages remain visible errors without discarding a valid login.
+**First-password setup intentionally follows Weather's
 email-only flow: it does not verify email ownership. Provision passwordless admin
 accounts only when their intended owners are ready to activate them.**
 The main gateway
@@ -87,13 +90,14 @@ Apply [`20261106170000_event_suggestion_moderation.sql`](./supabase/migrations/2
 
 Search and paginate pending, approved, or rejected submissions. Supply the organizer, official website, format, start date, description, and location for non-virtual events before approving. Approval publishes a listing as **Needs Confirmation** with low evidence confidence; rejection requires a reason and does not publish. Both retain the reviewer, timestamp, and review note. Reviewed submissions are read-only.
 
-The dashboard also runs **reset MongoDB and PostgreSQL → scraper → MongoDB → ETL with AI → PostgreSQL**.
+The dashboard also runs **reset staging and PostgreSQL → scraper → staging → ETL with AI → PostgreSQL**.
 Enter an OpenAI-compatible key for each run. Locally it stays in process memory;
 on Vercel it is encrypted temporarily in the worker's control database, never
 stored as plaintext or passed into Workflow history. The UI shows
 stage and import counts, including partial failures. Configure
-`SCRAPER_SERVICE_URL` and `ETL_SERVICE_URL` on the main gateway and use the
-same MongoDB database/collection for both services. Every manual and automatic
+`SCRAPER_SERVICE_URL` and `ETL_SERVICE_URL` on the main gateway. Edge functions
+share a private Supabase Storage bucket/prefix; legacy standalone services share
+their MongoDB database/collection. Every manual and automatic
 run permanently deletes scraper records, event listings and their dependent
 records before scraping. Accounts, suggestions/review history, categories and
 team members are retained; published suggestions are unlinked from deleted events.
@@ -102,8 +106,8 @@ partially filled. The two database resets are not atomic together.
 ETL remains insert-only. Animated stage cards display reset/scraper/ETL elapsed times. Optional weekly,
 every-two-week, or monthly schedules use the pipeline host's `AI_API_KEY`.
 The [gateway-only Supabase Edge deployment](./supabase/functions/README.md)
-moves both services, durable orchestration and scheduling to Supabase while
-retaining MongoDB and existing gateway API paths. Configure
+moves both services, durable orchestration and scheduling to Supabase, uses
+private Supabase Storage for raw staging, and preserves browser gateway APIs. Configure
 `PIPELINE_SERVICE_URL` on the main gateway to select it.
 Without that Edge routing, Vercel requires the [durable workflow worker](./pipeline-worker/README.md), its
 control-schema migration, and `PIPELINE_WORKER_URL` on the HackScout backend.

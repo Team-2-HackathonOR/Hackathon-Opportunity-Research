@@ -66,9 +66,9 @@ export const eventSchema = z.object({
 export type EventInput = z.infer<typeof eventSchema>;
 export type RawRecord = Record<string, unknown>;
 
-export const mongoImportSchema = z.object({
+export const storageImportSchema = z.object({
   database_name: text, collection_name: text, limit: z.number().int().min(1).max(1000).nullable().default(25),
-  fetched_at: z.string().min(1).max(40).nullable().default(null), cursor_mode: z.boolean().default(false),
+  fetched_at: z.string().min(1).max(40).refine((value) => Number.isFinite(Date.parse(value)), "Invalid run timestamp").nullable().default(null), cursor_mode: z.boolean().default(false),
   after_id: z.number().int().safe().min(0).nullable().default(null),
   use_ai_normalization: z.boolean().default(true), primary_researcher_id: id, verifier_id: id,
 });

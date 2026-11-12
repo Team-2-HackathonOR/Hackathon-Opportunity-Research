@@ -1,0 +1,5 @@
+[functions.scraper]
+verify_jwt = false
+
+[functions.etl]
+verify_jwt = false

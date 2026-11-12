@@ -40,19 +40,43 @@ it("routes admin controls directly to Edge, preserves function prefixes, and aut
   expect((await app.inject({
     url: "/api/hackscout/admin/pipeline", headers: { authorization: `Bearer ${viewer}` },
   })).statusCode).toBe(403);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/cancel",
+    headers: { authorization: `Bearer ${viewer}` }, payload: { jobId: "fixture" },
+  })).statusCode).toBe(403);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/restart",
+    headers: { authorization: `Bearer ${viewer}` }, payload: { jobId: "fixture", apiKey: "fixture" },
+  })).statusCode).toBe(403);
   const admin = await signTestToken("admin");
   const headers = { authorization: `Bearer ${admin}` };
   expect((await app.inject({ url: "/api/hackscout/admin/pipeline", headers })).statusCode).toBe(200);
   expect((await app.inject({ url: "/api/hackscout/admin/pipeline/schedule", headers })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/cancel", headers, payload: { jobId: "fixture" },
+  })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/restart", headers, payload: { jobId: "fixture", apiKey: "fixture" },
+  })).statusCode).toBe(200);
   expect((await app.inject({ method: "POST", url: "/api/etl/events", headers, payload: { event_name: "Test" } })).statusCode).toBe(200);
   expect((await app.inject({ url: "/api/scraper/hackathons?page=1", headers })).statusCode).toBe(200);
   expect((await app.inject({
     method: "POST", url: "/api/internal/etl/etl/import/mongodb", headers: internal, payload: { limit: 1 },
   })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "POST", url: "/api/internal/etl/etl/import/storage", headers: internal, payload: { limit: 1 },
+  })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "GET", url: "/api/internal/etl/etl/import/storage", headers: internal,
+  })).statusCode).toBe(403);
+  expect((await app.inject({
+    method: "POST", url: "/api/internal/etl/etl/import/storage", payload: { limit: 1 },
+  })).statusCode).toBe(403);
   expect(seen.map((v) => v.path)).toEqual([
     "/functions/v1/scraper/pipeline/tick", "/functions/v1/scraper/pipeline",
-    "/functions/v1/scraper/pipeline/schedule", "/functions/v1/etl/events",
-    "/functions/v1/scraper/hackathons?page=1", "/functions/v1/etl/etl/import/mongodb",
+    "/functions/v1/scraper/pipeline/schedule", "/functions/v1/scraper/pipeline/cancel",
+    "/functions/v1/scraper/pipeline/restart", "/functions/v1/etl/events",
+    "/functions/v1/scraper/hackathons?page=1", "/functions/v1/etl/etl/import/mongodb", "/functions/v1/etl/etl/import/storage",
   ]);
   expect(seen.every((v) => v.secret === TEST_GATEWAY_SECRET && v.caller === "team-2-gateway")).toBe(true);
 });

@@ -24,6 +24,8 @@ function signOut() {
   clearTimeout(pipelineTimer);
   clearInterval(pipelineClock);
   pipelineJob = null;
+  $("#pipeline-stop").disabled = true;
+  $("#pipeline-reset").hidden = true;
   $("#pipeline-progress").hidden = true;
   scraping = false;
   $("#scraper-run").disabled = false;
@@ -38,6 +40,25 @@ function signOut() {
   $("#scraper-api-key").value = "";
   $("#scraper-result").textContent = "";
   setLoginStep("email");
+}
+
+async function checkAdminSession() {
+  const response = await fetch("/api/hackscout/admin/auth/session", {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (response.status === 401 || response.status === 403) {
+    signOut();
+    notify("Your administrator session has expired. Sign in again.", true);
+    return;
+  }
+  if (!response.ok) {
+    throw new Error(`Could not verify administrator session (HTTP ${response.status}).`);
+  }
+  const session = await response.json();
+  if (session?.user?.role !== "admin") {
+    throw new Error("The administrator session response is invalid.");
+  }
 }
 
 async function api(route, { method = "GET", body, signal } = {}) {
@@ -63,7 +84,9 @@ async function api(route, { method = "GET", body, signal } = {}) {
     throw error;
   }
   if (!response.ok) {
-    if (authenticated && (response.status === 401 || response.status === 403)) signOut();
+    if (authenticated && (response.status === 401 || response.status === 403)) {
+      await checkAdminSession();
+    }
     throw new Error(payload.error || `Admin API returned HTTP ${response.status}.`);
   }
   return payload;
