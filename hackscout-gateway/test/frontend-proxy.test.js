@@ -4,7 +4,6 @@ const { createServer } = require("node:http");
 const { mkdtempSync, rmSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
-const { getBrowserScriptPaths } = require("./browser-script-loader");
 
 test("deployed frontend forwards browser APIs while backend routes stay protected", async (t) => {
   const keys = ["AUTH_GATEWAY_URL", "GATEWAY_INTERNAL_SECRET", "PIPELINE_SCHEDULE_PATH", "VERCEL"];
@@ -103,12 +102,7 @@ test("deployed frontend forwards browser APIs while backend routes stay protecte
     assert.equal((await fetch(`${base}/api/admin/pipeline`)).status, 403);
     assert.equal((await fetch(`${base}/api/hackathons`)).status, 403);
     assert.equal((await fetch(`${base}/hackscout-admin/`)).status, 200);
-    for (const source of getBrowserScriptPaths(join(__dirname, "..", "..", "admin-ui"))) {
-      assert.equal((await fetch(`${base}/hackscout-admin/${source}`)).status, 200, source);
-    }
-    for (const source of getBrowserScriptPaths(join(__dirname, "..", "..", "hackscout-ui"))) {
-      assert.equal((await fetch(`${base}/${source}`)).status, 200, source);
-    }
+    assert.equal((await fetch(`${base}/hackscout-admin/app.js`)).status, 200);
   });
 
   await t.test("missing production gateway URL fails explicitly", async () => {

@@ -24,8 +24,6 @@ export const gatewayInfoRoutes: FastifyPluginAsync = async (app) => {
       { path: "POST /api/hackscout/suggestions", upstream: env.HACKATHON_SERVICE_URL, access: "public" },
       { path: "/api/hackscout/admin/suggestions", upstream: env.HACKATHON_SERVICE_URL, access: "admin" },
       { path: "/api/hackscout/admin/auth/*", upstream: env.JWT_SERVICE_URL, access: "admin (access, login and setup public)" },
-      { path: "/api/hackscout/admin/pipeline", upstream: env.PIPELINE_SERVICE_URL ?? env.HACKSCOUT_SERVICE_URL, access: "admin" },
-      { path: "/api/internal/pipeline-worker/*", upstream: env.PIPELINE_SERVICE_URL ?? "not configured", access: "internal pipeline" },
       { path: "/api/hackscout/admin/*", upstream: env.HACKSCOUT_SERVICE_URL, access: "admin (login public)" },
       { path: "/api/etl/*", upstream: env.ETL_SERVICE_URL, access: "admin" },
       { path: "POST /api/internal/scraper/hackathons/reset", upstream: env.SCRAPER_SERVICE_URL ?? "http://127.0.0.1:3000", access: "internal pipeline" },
