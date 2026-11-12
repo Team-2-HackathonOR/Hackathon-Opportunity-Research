@@ -107,7 +107,14 @@ const jwtAuthPluginImpl: FastifyPluginAsync = async (app) => {
         || request.method === "POST" && [
           "/api/internal/scraper/hackathons/reset", "/api/internal/hackathons/reset",
         ].includes(path)
-        || request.method === "POST" && path === "/api/internal/etl/etl/import/mongodb";
+        || request.method === "POST" && path === "/api/internal/etl/etl/import/mongodb"
+        || request.method === "GET" && [
+          "/api/internal/pipeline-worker/pipeline", "/api/internal/pipeline-worker/schedule",
+        ].includes(path)
+        || request.method === "POST" && [
+          "/api/internal/pipeline-worker/pipeline/run", "/api/internal/pipeline-worker/schedule",
+          "/api/internal/pipeline-worker/pipeline/tick",
+        ].includes(path);
       if (!valid || request.headers["x-gateway-caller"] !== "team-2-gateway" || !allowed) {
         request.log.warn({ path, requestId: request.id }, "internal pipeline access denied");
         return reply.code(403).send({ error: "Internal pipeline access is required." });

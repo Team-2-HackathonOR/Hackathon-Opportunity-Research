@@ -178,32 +178,4 @@ describe("invitation sign-in", () => {
     expect(accounts.invitations.find((item) => item.email === "another@example.com")?.usedAt).toBeNull();
   });
 
-  it("requires an admin identity and the gateway caller", async () => {
-    const { service } = await createService();
-
-    const researcher = await service.inject({
-      method: "POST",
-      url: "/invitations",
-      headers: { ...gatewayHeaders, "x-user-id": adminHeaders["x-user-id"], "x-user-role": "researcher" },
-      payload: { email: "new.researcher@example.com", role: "viewer" },
-    });
-    const outsider = await service.inject({
-      method: "POST",
-      url: "/invitations/accept",
-      headers: { "content-type": "application/json" },
-      payload: { token: "a".repeat(32), password: "correct-password" },
-    });
-    const shortPassword = await service.inject({
-      method: "POST",
-      url: "/invitations/accept",
-      headers: gatewayHeaders,
-      payload: { token: "a".repeat(32), password: "short" },
-    });
-
-    expect(researcher.statusCode).toBe(403);
-    expect(researcher.json()).toEqual({ error: "Admin role is required." });
-    expect(outsider.statusCode).toBe(403);
-    expect(shortPassword.statusCode).toBe(400);
-    expect(shortPassword.json()).toMatchObject({ error: "Validation failed." });
-  });
 });

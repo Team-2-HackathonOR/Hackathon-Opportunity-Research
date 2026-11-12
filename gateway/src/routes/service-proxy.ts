@@ -5,6 +5,7 @@ import type { FastifyPluginAsync } from "fastify";
 
 import { env } from "../config/env.js";
 import { rewriteUpstreamHeaders } from "../lib/upstream-headers.js";
+import { serviceTarget } from "../lib/service-target.js";
 
 function hackathonProxy(prefix: string) {
   return {
@@ -41,8 +42,7 @@ export const serviceProxyRoutes: FastifyPluginAsync = async (app) => {
   if (env.SCRAPER_SERVICE_URL) {
     await app.register(proxy, {
       ...hackathonProxy("/api/scraper"),
-      upstream: env.SCRAPER_SERVICE_URL,
-      rewritePrefix: "",
+      ...serviceTarget(env.SCRAPER_SERVICE_URL),
     });
     app.log.info({ upstream: env.SCRAPER_SERVICE_URL }, "Scraper service route enabled");
   } else {

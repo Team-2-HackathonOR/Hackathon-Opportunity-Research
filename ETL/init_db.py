@@ -12,6 +12,7 @@ from app.config import get_settings
 SCHEMA_NAME = "hackathon_research"
 SENTINEL_TABLE = "team_members"
 SCHEMA_FILE = Path(__file__).with_name("hackathon_research_schema.sql")
+SCHEMA_DIRECTORY = Path(__file__).with_name("schema")
 
 
 def to_postgres_admin_url(database_url: str) -> str:
@@ -89,7 +90,10 @@ def main() -> None:
         )
         return
 
-    apply_schema(target_dsn, SCHEMA_FILE.read_text(encoding="utf-8"))
+    fragments = sorted(SCHEMA_DIRECTORY.glob("*.sql"))
+    if not fragments:
+        raise FileNotFoundError(f"No schema fragments found: {SCHEMA_DIRECTORY}")
+    apply_schema(target_dsn, "\n".join(fragment.read_text(encoding="utf-8") for fragment in fragments))
     print(f"Applied schema from '{SCHEMA_FILE.name}' to database '{database_name}'.")
 
 
