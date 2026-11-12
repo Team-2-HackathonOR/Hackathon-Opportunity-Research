@@ -14,6 +14,7 @@ function requireGateway(request, response, next) {
     console.warn("Direct HackScout API access denied.");
     return response.status(403).json({ error: "Use the main gateway to access the HackScout API." });
   }
+  request.gatewayAuthenticated = true;
   next();
 }
 
