@@ -25,7 +25,9 @@ function signOut() {
   clearInterval(pipelineClock);
   pipelineJob = null;
   $("#pipeline-stop").disabled = true;
+  $("#pipeline-clear").disabled = true;
   $("#pipeline-reset").hidden = true;
+  $("#pipeline-continue").hidden = true;
   $("#pipeline-progress").hidden = true;
   scraping = false;
   $("#scraper-run").disabled = false;

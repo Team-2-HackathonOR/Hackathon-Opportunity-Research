@@ -18,6 +18,7 @@ function updatePipelineClock() {
 }
 
 function showPipeline(job) {
+  const cleared = pipelineJob?.purpose === "clear" && !job;
   clearInterval(pipelineClock);
   pipelineJob = job;
   scraping = job?.status === "running" || job?.status === "queued";
@@ -28,10 +29,15 @@ function showPipeline(job) {
     : "No queued or running pipeline to stop.";
   $("#pipeline-reset").hidden = !job;
   $("#pipeline-reset").disabled = stoppingPipeline;
+  $("#pipeline-clear").disabled = scraping || stoppingPipeline;
+  $("#pipeline-clear").title = scraping ? "Stop the active pipeline before clearing." : "Permanently clear pipeline data and history.";
+  $("#pipeline-continue").hidden = job?.status !== "failed" || job?.stagingBackend !== "supabase-storage" || job?.purpose === "clear";
+  $("#pipeline-continue").disabled = scraping || stoppingPipeline;
   $("#pipeline-progress").hidden = !job;
   $("#scraper-result").classList.toggle("error", job?.status === "failed");
   if (!job) {
-    $("#scraper-result").textContent = "";
+    $("#scraper-result").textContent = cleared ? "Pipeline data, run history and operation records cleared. Automatic runs are disabled." : "";
+    for (const stage of ["reset", "scraper", "etl", "total"]) $(`#pipeline-time-${stage}`).textContent = "00:00";
     return;
   }
   const waiting = job.status === "queued" || job.executionState === "waiting";
@@ -55,7 +61,7 @@ function showPipeline(job) {
     .map(([database, count]) => `${database}: ${count} deleted`).join(", ");
   const resetSummary = reset ? `Reset ${reset}. ` : "";
   if (scraping && waiting) {
-    $("#scraper-result").textContent = `${resetSummary}${scrape}${job.status === "queued" ? "Queued" : `Waiting to advance ${job.cursor?.phase || job.stage}`}. No worker is executing this step. Check that the Supabase cron tick is active.`;
+    $("#scraper-result").textContent = `${job.purpose === "clear" ? "Clear all: " : ""}${resetSummary}${scrape}${job.status === "queued" ? "Queued" : `Waiting to advance ${job.cursor?.phase || job.stage}`}. No worker is executing this step. Check that the Supabase cron tick is active.`;
     return;
   }
   if (job.cancelled) {
@@ -63,7 +69,7 @@ function showPipeline(job) {
     return;
   }
   $("#scraper-result").textContent = scraping
-    ? `${resetSummary}${scrape}Running ${job.stage}. You can leave this page; the server continues the run.`
+    ? `${resetSummary}${scrape}${job.purpose === "clear" ? "Clear all is deleting data and will remove history after confirmed cleanup; no scraping or ETL will start." : `Running ${job.stage}.`} You can leave this page; the server continues the run.`
     : `${resetSummary}${scrape}${etl}${job.status === "completed" ? "Pipeline completed." : `Pipeline failed at ${job.stage}: ${job.error}`}`;
 }
 
@@ -136,6 +142,8 @@ $("#scraper-form").addEventListener("submit", async (event) => {
   scraping = true;
   $("#scraper-run").disabled = true;
   $("#pipeline-reset").disabled = true;
+  $("#pipeline-continue").disabled = true;
+  $("#pipeline-clear").disabled = true;
   $("#scraper-result").classList.remove("error");
   $("#scraper-result").textContent = "Starting the scraper and ETL pipeline...";
   clearTimeout(pipelineTimer);
@@ -158,6 +166,8 @@ $("#scraper-form").addEventListener("submit", async (event) => {
   } finally {
     $("#scraper-api-key").value = "";
     $("#pipeline-reset").disabled = stoppingPipeline;
+    $("#pipeline-continue").disabled = scraping || stoppingPipeline;
+    $("#pipeline-clear").disabled = scraping || stoppingPipeline;
     if (authenticated) pipelineTimer = setTimeout(loadPipeline, 3000);
   }
 });

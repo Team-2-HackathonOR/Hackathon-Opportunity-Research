@@ -1,7 +1,7 @@
 import { json } from '../_shared/runtime.ts';
 import { StorageError,storageFailure } from '../_shared/service-errors.ts';
 import { parsePositiveInteger } from '../_shared/scraper/parsing.ts';
-import { buildDevpostUrl,defaults,Dependencies,loadPage,mapHackathon,MAX_CACHE_ITEMS,persist,validPipelineTimestamp } from './scraper-io.ts';
+import { buildDevpostUrl,defaults,Dependencies,loadPage,mapHackathon,MAX_CACHE_ITEMS,MAX_RUN_RECORDS,persist,validPipelineTimestamp } from './scraper-io.ts';
 
 export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
   const deps = { ...defaults, ...overrides };
@@ -19,7 +19,8 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
         return json({ error: 'Database resets require an internal pipeline caller.' }, 403);
       }
       try {
-        return json({ reset: true, deletedRecords: await deps.store.reset() });
+        const result = await deps.store.reset();
+        return json({ reset: !result.hasMore, ...result });
       } catch (error) {
         return json(storageFailure(error), 500);
       }
@@ -70,9 +71,10 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
         return json({ error: 'Requested start page is outside the available Devpost page range.', requestedStartPage: startPage, totalPages: paginationAnalysis.totalPages }, 400);
       }
       const persistToStorage = batch || query.getAll('persist').some((value) => ['1', 'true', 'yes'].includes(value.toLowerCase()));
+      let persistedHackathons = hackathons;
       if (persistToStorage) {
         try {
-          await persist(deps, hackathons, sourceUrl, fetchedAt);
+          persistedHackathons = await persist(deps, hackathons, sourceUrl, fetchedAt);
         } catch (error) {
           if (!batch) return json({ ...storageFailure(error), sourceUrl }, 500);
           return json({ ...storageFailure(error), sourceUrl,
@@ -88,7 +90,9 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
       return json({
         sourceUrl, fetchedAt, requestedStartPage: startPage, requestedMaxPages: 1,
         targetPageRange: { startPage, endPage: startPage }, pagesRequested: 1, pagesPersisted: 1,
-        hackathonsPersisted: hackathons.length, uniqueHackathonsPersisted: new Set(hackathons.map((item) => item.id)).size,
+        hackathonsPersisted: persistedHackathons.length, uniqueHackathonsPersisted: new Set(persistedHackathons.map((item) => item.id)).size,
+        maxUniqueHackathons: MAX_RUN_RECORDS,
+        recordLimitReached: runUniqueHackathonsPersisted !== undefined && runUniqueHackathonsPersisted >= MAX_RUN_RECORDS,
         ...(timestamp ? { runUniqueHackathonsPersisted } : {}), paginationAnalysis, persisted: true,
         cacheEndpoint: '/hackathons/cache',
       });

@@ -2,10 +2,13 @@ import { cancelJob,claimJob,createJob,expireJobs,failedJob,latestJob,nextOccurre
 import { db,diagnosticError,env,HttpError,json,readJson } from "../_shared/runtime.ts";
 import { handleScraper } from "./service.ts";
 import { serviceJson } from "../_shared/service-errors.ts";
+import { MAX_RUN_RECORDS } from "./scraper-io.ts";
+import { advanceStorageReset,isResetAcknowledgement,resetOperationName,type ResetAcknowledgement } from "./reset-step.ts";
+import { resumeJob } from "../_shared/pipeline-resume.ts";
+import { finishClear } from "../_shared/pipeline-clear.ts";
 
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const count = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0;
-type Reset = { reset: true; deletedRecords: number };
 type PgReset = { reset: true; deletedEvents: number };
 type Scrape = { persisted: true; fetchedAt: string; pagesPersisted: number; runUniqueHackathonsPersisted: number; paginationAnalysis: { totalPages: number } };
 type Import = { processed_count: number; inserted_count: number; failed_count: number; next_after_id: number | null };
@@ -26,7 +29,8 @@ export async function tick(request: Request) {
   const job = row.job;
   try {
     if (job.stagingBackend !== "supabase-storage") throw new HttpError(409, "This job predates Storage staging. Stop it and start a fresh run; old MongoDB operations must not be replayed against Storage.");
-    const key = rowKey(row);
+    if (job.purpose === "clear" && !job.cursor.phase.startsWith("reset-")) throw new HttpError(503, "Clear-only checkpoint is invalid; scraping and ETL were not started.");
+    const key = job.purpose === "clear" ? "" : rowKey(row);
     job.status = "running";
     if (job.cursor.phase.startsWith("reset-")) {
       job.steps.reset.status = "running";
@@ -49,11 +53,10 @@ export async function tick(request: Request) {
         throw new HttpError(409, "This run uses retired MongoDB staging. Stop it and start a fresh Storage run; its old operation ledger must not be replayed against Storage.");
       }
       case "reset-storage": {
-        const result = await operation<Reset>(row, "reset-storage",
+        const result = await operation<ResetAcknowledgement>(row, resetOperationName(job),
           () => invokeScraper("/hackathons/reset", "POST"),
-          (v): v is Reset => record(v) && v.reset === true && count(v.deletedRecords));
-        job.reset.storage = result.deletedRecords;
-        job.cursor.phase = "reset-postgresql";
+          isResetAcknowledgement);
+        advanceStorageReset(job, result);
         break;
       }
       case "reset-postgresql": {
@@ -65,6 +68,10 @@ export async function tick(request: Request) {
           return { reset: true as const, deletedEvents: removed.count };
         }), (v): v is PgReset => record(v) && v.reset === true && count(v.deletedEvents));
         job.reset.postgresql = result.deletedEvents;
+        if (job.purpose === "clear") {
+          await finishClear(row);
+          return json({ ok: true, active: false, cleared: true });
+        }
         job.steps.reset.status = "completed";
         job.steps.reset.finishedAt = new Date().toISOString();
         job.cursor.phase = "scraper";
@@ -78,10 +85,10 @@ export async function tick(request: Request) {
         const result = await operation<Scrape>(row, `scrape-${page}`,
           () => invokeScraper(`/hackathons/persist-all?startPage=${page}&maxPages=1`),
           (v): v is Scrape => record(v) && v.persisted === true && v.fetchedAt === timestamp && v.pagesPersisted === 1 &&
-            count(v.runUniqueHackathonsPersisted) && record(v.paginationAnalysis) &&
+            count(v.runUniqueHackathonsPersisted) && v.runUniqueHackathonsPersisted <= MAX_RUN_RECORDS && record(v.paginationAnalysis) &&
             count(v.paginationAnalysis.totalPages) && v.paginationAnalysis.totalPages >= page);
         job.scraper = { pagesPersisted: page, uniqueHackathonsPersisted: result.runUniqueHackathonsPersisted };
-        if (page >= result.paginationAnalysis.totalPages) {
+        if (page >= result.paginationAnalysis.totalPages || result.runUniqueHackathonsPersisted >= MAX_RUN_RECORDS) {
           job.steps.scraper.status = "completed"; job.steps.scraper.finishedAt = new Date().toISOString();
           job.cursor.phase = "etl";
         } else job.cursor.page++;
@@ -135,15 +142,17 @@ export async function handlePipeline(request: Request, path: string): Promise<Re
     }
     return json({ job: await cancelJob(payload.jobId) });
   }
-  if (request.method === "POST" && (path === "/pipeline/run" || path === "/pipeline/restart")) {
+  if (request.method === "POST" && ["/pipeline/run", "/pipeline/restart", "/pipeline/continue"].includes(path)) {
     const payload = await readJson(request);
     if (!record(payload) || typeof payload.apiKey !== "string" || !payload.apiKey.trim() || payload.apiKey.length > 4096) throw new HttpError(400, "Enter a valid AI API key.");
     const restarting = path === "/pipeline/restart";
-    if (restarting && (typeof payload.jobId !== "string" ||
+    const continuing = path === "/pipeline/continue";
+    if ((restarting || continuing) && (typeof payload.jobId !== "string" ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.jobId))) {
-      throw new HttpError(400, "Choose a valid pipeline run to reset.");
+      throw new HttpError(400, `Choose a valid pipeline run to ${continuing ? "continue" : "reset"}.`);
     }
-    const job = await createJob(payload.apiKey.trim(), false, restarting ? String(payload.jobId) : undefined);
+    const job = continuing ? await resumeJob(String(payload.jobId), payload.apiKey.trim())
+      : await createJob(payload.apiKey.trim(), false, restarting ? String(payload.jobId) : undefined);
     if (!job) throw new HttpError(409, "No new pipeline run was queued. Refresh the pipeline status before trying again.");
     return json({ job }, 202);
   }

@@ -11,6 +11,8 @@
     <script src="admin-auth.js" defer></script>
     <script src="admin-pipeline.js" defer></script>
     <script src="admin-pipeline-stop.js" defer></script>
+    <script src="admin-pipeline-continue.js" defer></script>
+    <script src="admin-pipeline-clear.js" defer></script>
     <script src="admin-events.js" defer></script>
   </head>
   <body>
@@ -43,13 +45,17 @@
         <section class="panel scraper-panel" aria-labelledby="scraper-title">
           <p class="eyebrow">DATA COLLECTION</p>
           <h2 id="scraper-title">Run the full data pipeline</h2>
-          <p>Every manual and automatic Edge run permanently clears its Supabase Storage staging records and event listings before scraping Devpost and importing with AI. Accounts, suggestions/review history, categories and team members are preserved; deleted listings are unlinked from reviews. A failed run can leave staging or listings empty or partially filled. The API key is used only for this run and is not saved.</p>
+          <p>Every new manual and automatic Edge run permanently clears its Supabase Storage staging records and event listings before scraping Devpost and importing with AI. Accounts, suggestions/review history, categories and team members are preserved; deleted listings are unlinked from reviews. A failed run can leave staging or listings empty or partially filled. The API key is used only for this run and is not saved.</p>
           <form id="scraper-form">
             <label>AI API key<input id="scraper-api-key" type="password" autocomplete="off" spellcheck="false" required maxlength="4096" /></label>
             <div class="review-actions"><button id="scraper-run" class="primary" type="submit">Run scraper and ETL</button></div>
           </form>
           <button id="pipeline-stop" class="danger" type="button" disabled title="No queued or running pipeline to stop." aria-describedby="pipeline-stop-help">Stop pipeline</button>
           <button id="pipeline-reset" class="danger" type="button" hidden>Reset &amp; restart</button>
+          <button id="pipeline-continue" class="primary" type="button" hidden aria-describedby="pipeline-continue-help">Continue</button>
+          <button id="pipeline-clear" class="danger" type="button" aria-describedby="pipeline-clear-help">Clear all</button>
+          <p id="pipeline-clear-help" class="hint">Clear all permanently removes staged records, event listings, pipeline history and operation records without scraping again. No AI key is needed. Stop an active run first; unconfirmed operations must be investigated. History is removed only after cleanup is confirmed.</p>
+          <p id="pipeline-continue-help" class="hint">Continue requires a new API key above and resumes the latest stopped or failed run at its saved checkpoint, without starting over. A paused cleanup finishes its remaining deletions. Operations with unknown outcomes still require investigation.</p>
           <p id="pipeline-stop-help" class="hint">Stopping disables automatic runs and prevents further steps. An operation already executing may finish; completed deletions cannot be undone.</p>
           <p class="hint">Reset &amp; restart requires a new API key above and confirmation. It queues a fresh cleanup, scrape and ETL run and disables automatic runs; it never bypasses an uncertain-operation interlock.</p>
           <section id="pipeline-progress" class="pipeline-progress" aria-label="Pipeline progress" hidden>

@@ -2,6 +2,8 @@ $("#pipeline-stop").addEventListener("click", async () => {
   if (!pipelineJob || !scraping || stoppingPipeline) return;
   if (!confirm("Stop this pipeline and disable automatic runs? Completed deletions cannot be undone, and an operation already executing may finish.")) return;
   stoppingPipeline = true;
+  $("#pipeline-clear").disabled = true;
+  $("#pipeline-continue").disabled = true;
   $("#pipeline-stop").disabled = true;
   $("#pipeline-reset").disabled = true;
   clearTimeout(pipelineTimer);
@@ -19,6 +21,8 @@ $("#pipeline-stop").addEventListener("click", async () => {
     $("#scraper-result").textContent = `Could not stop pipeline: ${error.message}`;
   } finally {
     stoppingPipeline = false;
+    $("#pipeline-clear").disabled = scraping;
+    $("#pipeline-continue").disabled = scraping;
     $("#pipeline-stop").disabled = !scraping;
     $("#pipeline-reset").disabled = false;
     $("#scraper-run").disabled = scraping;
@@ -36,6 +40,8 @@ $("#pipeline-reset").addEventListener("click", async () => {
   }
   if (!confirm("Reset and restart the full pipeline? This permanently deletes scraper records and event listings, disables automatic runs, and starts scraping and ETL again. An uncertain operation will block the restart.")) return;
   stoppingPipeline = true;
+  $("#pipeline-clear").disabled = true;
+  $("#pipeline-continue").disabled = true;
   $("#pipeline-reset").disabled = true;
   $("#pipeline-stop").disabled = true;
   $("#scraper-run").disabled = true;
@@ -56,6 +62,8 @@ $("#pipeline-reset").addEventListener("click", async () => {
   } finally {
     $("#scraper-api-key").value = "";
     stoppingPipeline = false;
+    $("#pipeline-clear").disabled = scraping;
+    $("#pipeline-continue").disabled = scraping;
     $("#pipeline-reset").disabled = false;
     $("#pipeline-stop").disabled = !scraping;
     $("#scraper-run").disabled = scraping;

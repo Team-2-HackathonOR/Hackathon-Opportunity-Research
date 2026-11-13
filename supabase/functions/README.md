@@ -24,8 +24,10 @@ tick -> one staging Storage reset / PostgreSQL reset / scrape page / ETL record
 ETL step -> main gateway -> etl function -> private Storage + PostgreSQL
 ```
 
-No background promise or function-to-function HTTP bypass is used. Each minute
-advances at most one step. The queue, lease, cursor, progress, encrypted keys and
+No background promise or function-to-function HTTP bypass is used. A tick every
+1 second advances at most one step. A leased step is not executed again by
+overlapping ticks; steps taking longer than 1 second still finish at their own pace.
+The queue, lease, cursor, progress, encrypted keys and
 operation ledger live in the private `pipeline_control` schema. The admin
 gateway route avoids a second frontend/backend/gateway round trip.
 
@@ -42,7 +44,49 @@ gateway route avoids a second frontend/backend/gateway round trip.
    Also apply `../migrations/20261112200000_pipeline_cancel.sql` before deploying
    the admin stop control. It adds cancellation without changing existing jobs.
    Apply `../migrations/20261112210000_pipeline_restart.sql` for Reset & restart.
+   Apply `../migrations/20261113035500_pipeline_ack.sql` before deploying the
+   scraper's atomic operation acknowledgement. It serializes acknowledgement
+   with cancellation. A stopped run's temporary blocker is cleared only when
+   every admitted operation is confirmed; the run stays cancelled and its key
+   stays erased. Missing acknowledgements still require investigation. This
+   migration does not clear historical blockers or start/reset a run.
+   Apply `../migrations/20261113130000_pipeline_resume.sql` before deploying
+   Continue. `POST /pipeline/continue` requires a verified administrator, the
+   displayed `jobId`, and a fresh `apiKey`. It requeues the same latest failed or
+   stopped Storage run, keeping its original timestamp, cursor, progress, data
+   and operation ledger. Completed acknowledgements replay without repeating
+   their side effects; no new cleanup is introduced, but a paused cleanup
+   finishes its remaining batches. Previous failure details remain in
+   `resumeHistory`, and the replacement key has a new 24-hour encrypted lifetime.
+   Continue rejects outstanding operations, blockers, leases, obsolete/legacy
+   checkpoints, and failed ETL records that would otherwise be skipped.
+   It does not change automatic scheduling.
+   Apply `../migrations/20261113140000_pipeline_clear.sql` before deploying
+   **Clear all**. `POST /pipeline/clear` requires a verified administrator,
+   `{jobId, confirmation: "CLEAR ALL"}`; `jobId` is the latest displayed run ID,
+   or `null` when no history exists. It queues durable cleanup without an AI key:
+   bounded Storage reset batches, then the existing PostgreSQL event reset.
+   Only after both acknowledgements does it atomically remove all pipeline jobs
+   and operation records and reset automatic scheduling to disabled. Scraping
+   and ETL never start; accounts, submissions/reviews, categories and team
+   members survive. The worker cron stays active. Stop active runs first;
+   blockers, leases and unconfirmed operations anywhere in history prevent
+   clearing. A failed cleanup retains history; after inspecting its outcome,
+   use Clear all again rather than Continue. Deploying this migration alone
+   neither queues cleanup nor deletes records.
 3. Configure both functions' server secrets using `.env.example` as the inventory.
+   Set `AUTH_GATEWAY_URL` to the HTTPS origin of the deployed **main gateway**.
+   The scraper requires this setting to send ETL imports through the gateway.
+   Local environment files and the cron dispatcher's Vault URL do not configure
+   this Edge Function setting. For example:
+
+   ```text
+   supabase secrets set AUTH_GATEWAY_URL=https://YOUR-MAIN-GATEWAY --project-ref PROJECT
+   ```
+
+   Setting a hosted secret does not require redeploying the function. Automatic
+   runs additionally require `AI_API_KEY`, configured privately in Supabase;
+   a key supplied for a manual run does not enable automatic scheduling.
    Use a PostgreSQL transaction-pooler URL and a role with access to the private
    control schema and research tables. Connections disable prepared statements
    and require verified TLS; supply the official project CA as
@@ -102,13 +146,23 @@ gateway route avoids a second frontend/backend/gateway round trip.
    function calls without gateway credentials return 403. Then register:
 
    ```sql
-   SELECT cron.schedule('hackscout-edge-tick','* * * * *',
+   SELECT cron.schedule('hackscout-edge-tick','1 second',
      'SELECT pipeline_control.dispatch_edge_tick()');
    ```
 
    The tick is required even for manual queued runs. Scheduling frequency
    defaults to off for a new schema; existing persisted settings are preserved.
    Review/disable an existing automatic schedule before registering the tick.
+
+   For an existing worker, change only its cadence without re-enabling a paused job:
+
+   ```sql
+   SELECT cron.alter_job(jobid, schedule := '1 second')
+   FROM cron.job WHERE jobname = 'hackscout-edge-tick';
+   ```
+
+   This requires pg_cron 1.5 or later. One-second ticks send 60 requests per
+   minute, including while idle: 60 times the dispatch requests of minute ticks.
 
 No deployment or destructive run is implicit in these steps. An actual manual
 or automatic pipeline still permanently resets its Storage staging records and event listings.
@@ -171,6 +225,12 @@ Cleanup removes only matching record filenames in the configured prefix,
 validates every deletion acknowledgement, and never empties the whole bucket
 or removes unrelated files/subfolders. Reserve this prefix for the scraper.
 Use a private bucket: public buckets are refused even with a valid server key.
+`POST /hackathons/reset` deletes at most 100 owned objects per request. It returns
+`deletedRecords`, `hasMore`, and `reset: !hasMore`; partial cleanup is not a completed
+reset. The pipeline checkpoints each acknowledged batch, accumulates deleted
+counts, and advances to PostgreSQL only after the final batch. It keeps the first
+operation named `reset-storage`, so an old uncertain reset cannot be bypassed.
+Previously completed whole-reset acknowledgements remain replayable.
 
 The canonical import route is `POST /etl/import/storage`, forwarded through
 `POST /api/internal/etl/etl/import/storage` on the main gateway.
@@ -184,6 +244,11 @@ New jobs are marked `stagingBackend: "supabase-storage"` and use `reset-storage`
 ## Bounds and recovery
 
 - Scraping requires `maxPages=1` per persistence request.
+- Each Edge run admits at most **9,998 unique source IDs** before Storage uploads.
+  Duplicate IDs update their existing records without using another slot.
+  A page crossing the cap persists only the IDs that fit; the pipeline completes
+  scraping and advances to ETL at the cap even when Devpost has more pages.
+  This does not resume an already failed run or clear an uncertain-operation interlock.
 - AI Storage/file imports accept one record per request; non-AI imports accept up
   to 25. Larger requests fail **before writes** rather than partially succeeding.
   File imports support JSON, JSONL and CSV, with a 1 MB multipart request limit.
@@ -192,6 +257,8 @@ New jobs are marked `stagingBackend: "supabase-storage"` and use `reset-storage`
 - Storage operations share a 25-second budget with 15-second HTTP timeouts.
   Writes use at most ten parallel requests; records are capped at 250 KB,
   API responses at 2 MB, and cache reads at 8 MB.
+  Cleanup uses one deletion request per tick, with a 100-object batch and bounded
+  lookahead instead of listing and deleting the entire staging run in one request.
 - Evidence fetches have a 35-second shared budget, per-page timeouts and size
   caps; AI completion is limited to 45 seconds. Unknown facts stay unknown.
 - Import processing shares a 100-second request budget. Each event transaction

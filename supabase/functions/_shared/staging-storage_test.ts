@@ -34,7 +34,8 @@ Deno.test("Storage cleanup deletes only owned record objects and checks exact de
     fixture.objects.set("other-prefix/keep.json", { keep: true });
     fixture.objects.set("hackscout/raw/notes.json", { keep: true });
     fixture.objects.set("hackscout/raw/subfolder/keep.json", { keep: true });
-    assert(await stagingStore.reset() === 1, "Wrong reset count.");
+    const result = await stagingStore.reset();
+    assert(result.deletedRecords === 1 && !result.hasMore, "Wrong reset count or completion status.");
     assert(fixture.objects.size === 3, "Cleanup deleted unrelated files or folders.");
     await stagingStore.persist([{ id: 1, fetchedAt: first }]);
     fixture.state.badDeleteAck = true;
@@ -75,5 +76,37 @@ Deno.test("Storage listing paginates without silently truncating records", async
     for (let id = 0; id < 1001; id++) fixture.objects.set(`hackscout/raw/${run}_${String(id).padStart(16, "0")}.json`, { id, fetchedAt: first });
     assert(await stagingStore.count(first) === 1001, "Only the first listing page was counted.");
     assert((await stagingStore.read(first, 999, 1))[0].id === 1000, "Cursor failed across the listing boundary.");
+  } finally { fixture.restore(); }
+});
+
+Deno.test("Storage reset deletes at most 100 owned objects per acknowledged request and drains without offset skips", async () => {
+  const fixture = storageFixture();
+  try {
+    for (let id = 0; id < 205; id++) {
+      fixture.objects.set(`hackscout/raw/${Date.parse(first)}_${String(id).padStart(16, "0")}.json`, { id, fetchedAt: first });
+    }
+    fixture.objects.set("hackscout/raw/notes.json", { keep: true });
+    fixture.objects.set("hackscout/raw/subfolder/keep.json", { keep: true });
+    const firstBatch = await stagingStore.reset();
+    assert(firstBatch.deletedRecords === 100 && firstBatch.hasMore && fixture.objects.size === 107, "First request was unbounded or claimed completion.");
+    const secondBatch = await stagingStore.reset();
+    assert(secondBatch.deletedRecords === 100 && secondBatch.hasMore, "Deletion skipped records as the listing shrank.");
+    const finalBatch = await stagingStore.reset();
+    assert(finalBatch.deletedRecords === 5 && !finalBatch.hasMore && fixture.objects.size === 2, "Cleanup did not finish or removed unrelated objects.");
+    const empty = await stagingStore.reset();
+    assert(empty.deletedRecords === 0 && !empty.hasMore, "Empty prefix did not finish.");
+    assert(fixture.calls.filter((call) => call.method === "DELETE").length === 3, "A batch issued multiple deletion requests.");
+  } finally { fixture.restore(); }
+});
+
+Deno.test("Storage reset bounds its first batch without scanning the whole 9,998-record prefix", async () => {
+  const fixture = storageFixture();
+  try {
+    for (let id = 0; id < 9998; id++) {
+      fixture.objects.set(`hackscout/raw/${Date.parse(first)}_${String(id).padStart(16, "0")}.json`, { id, fetchedAt: first });
+    }
+    const result = await stagingStore.reset();
+    assert(result.deletedRecords === 100 && result.hasMore && fixture.objects.size === 9898, "Large reset exceeded the batch bound.");
+    assert(fixture.calls.filter((call) => call.path.startsWith("object/list/")).length === 1, "Reset scanned the entire prefix before deleting a batch.");
   } finally { fixture.restore(); }
 });

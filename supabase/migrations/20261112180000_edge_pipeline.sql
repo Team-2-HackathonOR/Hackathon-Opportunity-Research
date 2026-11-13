@@ -72,5 +72,5 @@ REVOKE ALL ON ALL TABLES IN SCHEMA pipeline_control FROM PUBLIC, anon, authentic
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA pipeline_control FROM PUBLIC, anon, authenticated;
 
 -- Register the tick only after gateway/Edge deployment and Vault configuration:
--- SELECT cron.schedule('hackscout-edge-tick','* * * * *',
+-- SELECT cron.schedule('hackscout-edge-tick','1 second',
 --   'SELECT pipeline_control.dispatch_edge_tick()');

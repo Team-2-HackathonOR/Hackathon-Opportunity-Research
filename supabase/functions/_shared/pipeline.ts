@@ -9,11 +9,11 @@ type Step = { status: string; startedAt?: string; finishedAt?: string };
 export type Job = {
   id: string; status: string; stage: string; startedAt: string; finishedAt?: string; error?: string;
   cancelled?: boolean; executionState?: "waiting" | "executing";
-  stagingBackend?: "supabase-storage";
+  stagingBackend?: "supabase-storage"; purpose?: "clear";
   reset: Record<string, number>; steps: Record<string, Step>;
   scraper?: { pagesPersisted: number; uniqueHackathonsPersisted: number };
   etl?: { processed: number; inserted: number; failed: number };
-  cursor: { phase: string; page: number; afterId: number | null };
+  cursor: { phase: string; page: number; afterId: number | null; resetBatch?: number };
 };
 type Row = {
   id: string; status: string; job: Job; key_ciphertext: string | null; key_expires_at: Date;
@@ -172,8 +172,8 @@ export async function operation<T>(row: Row, name: string, run: () => Promise<un
       return saved;
     },
     complete: async (result) => {
-      await db()`UPDATE pipeline_control.operations SET status='completed',result=${db().json(JSON.parse(JSON.stringify(result)))}
-        WHERE job_id=${row.id} AND name=${name}`;
+      await db()`SELECT pipeline_control.complete_edge_operation(
+        ${row.id}::uuid,${name},${db().json(JSON.parse(JSON.stringify(result)))})`;
     },
   }, run, validate);
 }

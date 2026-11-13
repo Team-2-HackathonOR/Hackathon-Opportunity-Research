@@ -14,6 +14,7 @@ async function fixture() {
   await db.exec(edge.replace(/^CREATE EXTENSION[^;\n]*;\s*$/gm, ""));
   await db.exec(await readFile(path.join(root, "supabase/migrations/20261112200000_pipeline_cancel.sql"), "utf8"));
   await db.exec(await readFile(path.join(root, "supabase/migrations/20261112210000_pipeline_restart.sql"), "utf8"));
+  await db.exec(await readFile(path.join(root, "supabase/migrations/20261113035500_pipeline_ack.sql"), "utf8"));
   const job = {
     id, status: "running", stage: "reset",
     steps: { reset: { status: "running" }, scraper: { status: "waiting" }, etl: { status: "waiting" } },
@@ -108,6 +109,50 @@ test("restart refuses in-flight operations, restart interlocks and stale run tar
     await db.query("UPDATE pipeline_control.operations SET status='completed' WHERE job_id=$1", [id]);
     assert.equal((await db.query("SELECT pipeline_control.prepare_edge_restart($1) AS ready", [id])).rows[0].ready, false);
     assert.equal((await db.query("SELECT pipeline_control.prepare_edge_restart($1) AS ready", [token])).rows[0].ready, false);
+    assert.equal((await db.query("SELECT blocked_until='infinity'::timestamptz AS blocked FROM pipeline_control.jobs")).rows[0].blocked, true);
+  } finally { await db.close(); }
+});
+
+test("a confirmed late acknowledgement releases only the cancelled run's blocker without reviving it", async () => {
+  const db = await fixture();
+  try {
+    await db.query("INSERT INTO pipeline_control.operations(job_id,name,status) VALUES ($1,'reset-storage-6','started')", [id]);
+    const stopped = (await db.query("SELECT pipeline_control.cancel_edge_job($1) AS job", [id])).rows[0].job;
+    const result = { reset: false, hasMore: true, deletedRecords: 100 };
+    await db.query("SELECT pipeline_control.complete_edge_operation($1,$2,$3)", [id, "reset-storage-6", result]);
+    assert.deepEqual((await db.query("SELECT job,status,blocked_until,key_ciphertext,execution_id,execution_until FROM pipeline_control.jobs")).rows[0],
+      { job: stopped, status: "failed", blocked_until: null, key_ciphertext: null, execution_id: null, execution_until: null });
+    assert.deepEqual((await db.query("SELECT status,result FROM pipeline_control.operations")).rows[0], { status: "completed", result });
+    assert.equal((await db.query("SELECT pipeline_control.prepare_edge_restart($1) AS ready", [id])).rows[0].ready, true);
+    await assert.rejects(db.query("SELECT pipeline_control.complete_edge_operation($1,$2,$3)", [id, "reset-storage-6", result]), /started operation/);
+    for (const role of ["anon", "authenticated"]) {
+      assert.equal((await db.query("SELECT has_function_privilege($1,'pipeline_control.complete_edge_operation(uuid,text,jsonb)','EXECUTE') AS allowed", [role])).rows[0].allowed, false);
+    }
+  } finally { await db.close(); }
+});
+
+test("late acknowledgement retains the cancellation blocker until every admitted operation is confirmed", async () => {
+  const db = await fixture();
+  try {
+    await db.query("INSERT INTO pipeline_control.operations(job_id,name,status) VALUES ($1,'first','started'),($1,'second','started')", [id]);
+    await db.query("SELECT pipeline_control.cancel_edge_job($1)", [id]);
+    await db.query("SELECT pipeline_control.complete_edge_operation($1,$2,$3)", [id, "first", { deletedRecords: 100 }]);
+    assert.equal((await db.query("SELECT blocked_until='infinity'::timestamptz AS blocked FROM pipeline_control.jobs")).rows[0].blocked, true);
+    assert.equal((await db.query("SELECT pipeline_control.prepare_edge_restart($1) AS ready", [id])).rows[0].ready, false);
+    await db.query("SELECT pipeline_control.complete_edge_operation($1,$2,$3)", [id, "second", { deletedRecords: 100 }]);
+    assert.equal((await db.query("SELECT blocked_until FROM pipeline_control.jobs")).rows[0].blocked_until, null);
+  } finally { await db.close(); }
+});
+
+test("unconfirmed acknowledgements and non-cancelled failures never clear the interlock", async () => {
+  const db = await fixture();
+  try {
+    await db.query("INSERT INTO pipeline_control.operations(job_id,name,status) VALUES ($1,'reset-storage','started')", [id]);
+    await db.query(`UPDATE pipeline_control.jobs SET status='failed',blocked_until='infinity',
+      key_ciphertext=NULL,execution_id=NULL,execution_until=NULL WHERE id=$1`, [id]);
+    await assert.rejects(db.query("SELECT pipeline_control.complete_edge_operation($1,$2,$3)", [id, "reset-storage", null]), /must be an object/);
+    assert.equal((await db.query("SELECT status FROM pipeline_control.operations")).rows[0].status, "started");
+    await db.query("SELECT pipeline_control.complete_edge_operation($1,$2,$3)", [id, "reset-storage", { deletedRecords: 100 }]);
     assert.equal((await db.query("SELECT blocked_until='infinity'::timestamptz AS blocked FROM pipeline_control.jobs")).rows[0].blocked, true);
   } finally { await db.close(); }
 });

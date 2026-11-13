@@ -52,10 +52,10 @@ remain gateway-only; `/hackscout-admin/` serves the admin UI.
 
 For a separate static admin deployment, set the Vercel project's Root Directory
 to `admin-ui`. Its `vercel.json` forwards `/api/hackscout/admin/*` server-side
-through `https://hackascout-gateway.vercel.app`, including authentication,
+through the main gateway at `https://gateway-three-chi.vercel.app`, including authentication,
 moderation, and pipeline requests. This keeps browser requests and HttpOnly
 session cookies on the admin site's own origin. Update the rewrite destination
-if the HackScout frontend domain changes. Redeploy the admin project after
+if the main gateway domain changes. Redeploy the admin project after
 adding or changing this configuration; deploying only its static assets without
 the rewrite causes Vercel `NOT_FOUND` responses for admin API requests.
 
@@ -98,11 +98,27 @@ stage and import counts, including partial failures. Configure
 `SCRAPER_SERVICE_URL` and `ETL_SERVICE_URL` on the main gateway. Edge functions
 share a private Supabase Storage bucket/prefix; legacy standalone services share
 their MongoDB database/collection. Every manual and automatic
+Edge run stops scraping at **9,998 unique records** and then proceeds to ETL;
+duplicate source IDs do not consume additional slots. Every new manual and automatic
 run permanently deletes scraper records, event listings and their dependent
 records before scraping. Accounts, suggestions/review history, categories and
 team members are retained; published suggestions are unlinked from deleted events.
+Edge staging cleanup checkpoints batches of at most 100 deletions per tick before
+advancing to the PostgreSQL reset, rather than deleting the whole run in one request.
 A failed reset stops the pipeline; later failures can leave databases empty or
 partially filled. The two database resets are not atomic together.
+**Continue** requeues the latest stopped or failed Storage run at its saved
+checkpoint using a replacement API key, retaining the original run timestamp,
+progress and completed acknowledgements. It does not restart cleanup; a cleanup
+already underway finishes only its remaining batches. Unknown outcomes still
+block continuation, and a newer run makes older checkpoints unsafe to resume.
+**Clear all** permanently deletes staged records and event listings, then removes
+all pipeline runs and operation records only after both cleanups are acknowledged.
+It needs no AI key, disables automatic runs, and never starts scraping or ETL.
+Stop any active run first; unconfirmed operations, blockers and leases prevent
+clearing. Accounts, submissions and reviews are preserved. Cleanup continues on
+the server if you leave the page; the old progress display disappears when done.
+Edge ticks run once per second without overlapping an already leased step.
 ETL remains insert-only. Animated stage cards display reset/scraper/ETL elapsed times. Optional weekly,
 every-two-week, or monthly schedules use the pipeline host's `AI_API_KEY`.
 The [gateway-only Supabase Edge deployment](./supabase/functions/README.md)

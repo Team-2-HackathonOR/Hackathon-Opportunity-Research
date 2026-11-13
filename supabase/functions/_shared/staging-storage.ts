@@ -2,11 +2,14 @@ import { StorageError } from "./service-errors.ts";
 import { encodePath, objectRecord, requirePrivateBucket, storageRequest } from "./storage-http.ts";
 
 export type StagedRecord = Record<string, unknown> & { id: number; fetchedAt: string };
+export type StorageResetBatch = { deletedRecords: number; hasMore: boolean };
+export const MAX_RESET_RECORDS = 100;
 export interface StagingStore {
   persist(records: StagedRecord[]): Promise<void>;
   read(fetchedAt: string | null, afterId: number | null, limit: number): Promise<StagedRecord[]>;
   count(fetchedAt: string): Promise<number>;
-  reset(): Promise<number>;
+  ids(fetchedAt: string): Promise<Set<number>>;
+  reset(): Promise<StorageResetBatch>;
 }
 const MAX_OBJECTS = 10000;
 const FILE = /^(-?\d+)_(\d{16})\.json$/;
@@ -18,7 +21,7 @@ const timestamp = (value: string) => {
 const fileName = (record: StagedRecord) => `${timestamp(record.fetchedAt)}_${String(record.id).padStart(16, "0")}.json`;
 type Config = Awaited<ReturnType<typeof requirePrivateBucket>>;
 
-async function names(config: Config, signal: AbortSignal, fetchedAt?: string) {
+async function names(config: Config, signal: AbortSignal, fetchedAt?: string, take = MAX_OBJECTS + 1) {
   const result: string[] = [];
   for (let offset = 0; offset <= MAX_OBJECTS; offset += 1000) {
     const entries = await storageRequest(`object/list/${encodeURIComponent(config.bucket)}`, "POST", signal, {
@@ -32,7 +35,10 @@ async function names(config: Config, signal: AbortSignal, fetchedAt?: string) {
     if (offset + entries.length > MAX_OBJECTS) throw new StorageError("STORAGE_LIMIT_EXCEEDED", 413);
     for (const entry of entries) {
       if (objectRecord(entry) && typeof entry.name === "string" && entry.id !== null && FILE.test(entry.name) &&
-          (!fetchedAt || entry.name.startsWith(`${timestamp(fetchedAt)}_`))) result.push(entry.name);
+          (!fetchedAt || entry.name.startsWith(`${timestamp(fetchedAt)}_`))) {
+        result.push(entry.name);
+        if (result.length === take) return result;
+      }
     }
     if (entries.length < 1000) return result;
   }
@@ -65,6 +71,17 @@ export const stagingStore: StagingStore = {
     const signal = AbortSignal.timeout(25000);
     const config = await requirePrivateBucket(signal);
     return (await names(config, signal, fetchedAt)).length;
+  },
+  async ids(fetchedAt) {
+    const signal = AbortSignal.timeout(25000);
+    const config = await requirePrivateBucket(signal);
+    const result = new Set<number>();
+    for (const name of await names(config, signal, fetchedAt)) {
+      const id = Number(FILE.exec(name)![2]);
+      if (!Number.isSafeInteger(id)) throw new StorageError("STORAGE_RECORD_INVALID", 502);
+      result.add(id);
+    }
+    return result;
   },
   async read(fetchedAt, afterId, limit) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_OBJECTS ||
@@ -101,18 +118,16 @@ export const stagingStore: StagingStore = {
   async reset() {
     const signal = AbortSignal.timeout(25000);
     const config = await requirePrivateBucket(signal);
-    const files = await names(config, signal);
-    let deleted = 0;
-    for (let offset = 0; offset < files.length; offset += 100) {
-      const paths = files.slice(offset, offset + 100).map((name) => `${config.prefix}/${name}`);
+    const files = await names(config, signal, undefined, MAX_RESET_RECORDS + 1);
+    const paths = files.slice(0, MAX_RESET_RECORDS).map((name) => `${config.prefix}/${name}`);
+    if (paths.length) {
       const removed = await storageRequest(`object/${encodeURIComponent(config.bucket)}`, "DELETE", signal, { prefixes: paths });
       if (!Array.isArray(removed) || removed.length !== paths.length ||
           new Set(removed.map((entry) => objectRecord(entry) ? entry.name : undefined)).size !== paths.length ||
           removed.some((entry) => !objectRecord(entry) || typeof entry.name !== "string" || !paths.includes(entry.name))) {
         throw new StorageError("STORAGE_MUTATION_UNCONFIRMED", 502);
       }
-      deleted += removed.length;
     }
-    return deleted;
+    return { deletedRecords: paths.length, hasMore: files.length > MAX_RESET_RECORDS };
   },
 };

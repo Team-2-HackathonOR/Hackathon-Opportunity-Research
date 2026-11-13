@@ -1,4 +1,5 @@
 import { stagingStore,type StagingStore } from '../_shared/staging-storage.ts';
+import { StorageError } from '../_shared/service-errors.ts';
 import { analyzePagination } from '../_shared/scraper/analyzer.ts';
 import { requestJson,type JsonResult } from '../_shared/scraper/http.ts';
 import type { DevpostApiResponse,DevpostHackathon,ScrapedHackathon } from '../_shared/scraper/models.ts';
@@ -9,6 +10,7 @@ export const DEVPOST_URL = 'https://devpost.com/api/hackathons';
 export const MAX_PAGE_ITEMS = 1000;
 
 export const MAX_CACHE_ITEMS = 10000;
+export const MAX_RUN_RECORDS = 9998;
 
 export const mapHackathon = (hackathon: DevpostHackathon): ScrapedHackathon => ({
   id: hackathon.id,
@@ -63,9 +65,20 @@ export const defaults: Dependencies = {
 };
 
 export async function persist(deps: Dependencies, hackathons: ScrapedHackathon[], sourceUrl: string, fetchedAt: string) {
-  if (!hackathons.length) return;
+  if (!hackathons.length) return [];
+  const ids = await deps.store.ids(fetchedAt);
+  if (ids.size > MAX_RUN_RECORDS) throw new StorageError('STORAGE_LIMIT_EXCEEDED', 413);
+  const selected = hackathons.filter((hackathon) => {
+    if (ids.has(hackathon.id)) return true;
+    if (ids.size >= MAX_RUN_RECORDS) return false;
+    ids.add(hackathon.id);
+    return true;
+  });
   const updatedAt = deps.now();
-  await deps.store.persist(hackathons.map((hackathon) => ({ ...hackathon, fetchedAt, sourceUrl, updatedAt })));
+  if (selected.length) {
+    await deps.store.persist(selected.map((hackathon) => ({ ...hackathon, fetchedAt, sourceUrl, updatedAt })));
+  }
+  return selected;
 }
 
 export async function loadPage(deps: Dependencies, url: string) {
