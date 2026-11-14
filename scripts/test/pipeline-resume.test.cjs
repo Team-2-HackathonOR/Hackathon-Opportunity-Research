@@ -19,6 +19,9 @@ async function fixture(phase = "etl") {
     CREATE SCHEMA hackathon_research; CREATE TABLE hackathon_research.events(id int);
     INSERT INTO hackathon_research.events VALUES (1);`);
   await db.exec(await readFile(path.join(root, "supabase/migrations/20261113130000_pipeline_resume.sql"), "utf8"));
+  for (const name of ["20261113220000_pipeline_dead_letters.sql", "20261113220100_dead_letter_resume.sql"]) {
+    await db.exec(await readFile(path.join(root, "supabase", "migrations", name), "utf8"));
+  }
   const job = {
     id, status: "failed", cancelled: true, stage: phase === "etl" ? "etl" : "reset",
     error: "Stopped by administrator.", startedAt: "2026-11-13T01:03:05.180Z", finishedAt: "2026-11-13T03:52:33.308Z",

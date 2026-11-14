@@ -1,5 +1,5 @@
 import { dateOnly,first,object,rename,stamp } from './normalization-helpers.ts';
-import { benefitKinds,trackKinds,type RawRecord } from "./schema.ts";
+import { benefitKinds,requirementKinds,trackKinds,type RawRecord } from "./schema.ts";
 
 export function sanitizeAiPayload(input: RawRecord): RawRecord {
   const result = { ...input };
@@ -45,14 +45,25 @@ export function sanitizeAiPayload(input: RawRecord): RawRecord {
   });
   mapItems("application_requirement_items", (r) => {
     r.queue_type = rename(r.queue_type, queueMap);
-    r.requirement_type = rename(r.requirement_type, { account: "registration_account", signup: "registration_account", cv: "resume",
-      portfolio: "portfolio_github", github: "portfolio_github", student_id: "student_verification", essay: "essay_questions",
-      team: "team_information", idea: "project_idea", referral: "referral_invite", invite: "referral_invite",
-      demo_video_requirements: "other", demo_video: "other", video: "other", post_acceptance: "post_acceptance_step" });
+    let unrecognizedType = false;
+    if (typeof r.requirement_type === "string" && r.requirement_type.trim()) {
+      const mapped = rename(r.requirement_type.trim().toLowerCase(), { account: "registration_account", signup: "registration_account", cv: "resume",
+        portfolio: "portfolio_github", github: "portfolio_github", student_id: "student_verification", essay: "essay_questions",
+        team: "team_information", idea: "project_idea", referral: "referral_invite", invite: "referral_invite",
+        demo_video_requirements: "other", demo_video: "other", video: "other", post_acceptance: "post_acceptance_step" });
+      unrecognizedType = !requirementKinds.some((kind) => kind === mapped);
+      r.requirement_type = unrecognizedType ? "other" : mapped;
+    }
     r.status = rename(r.status, { "not started": "not_started", "in progress": "in_progress", "n/a": "not_applicable" });
     if (r.due_at) r.due_at = stamp(r.due_at) ?? r.due_at;
     fallbackText(r, "requirement_text", "description", "name", "title");
     if (typeof r.notes === "boolean") r.notes = r.notes ? "True" : "False";
+    if (unrecognizedType) {
+      console.warn("AI requirement classification normalized to other.", { path: ["application_requirement_items", "requirement_type"] });
+      if (r.notes === null || r.notes === undefined || typeof r.notes === "string") {
+        r.notes = `${r.notes ?? ""} Unrecognized AI requirement classification was normalized to other.`.trim();
+      }
+    }
     return r;
   });
   if (object(result.shortlist_entry)) {

@@ -20,6 +20,9 @@ async function fixture() {
     CREATE TABLE public.preserved_accounts(id int); INSERT INTO public.preserved_accounts VALUES (1);
     UPDATE pipeline_control.schedule SET value='{"frequency":"weekly","nextRunAt":"2027-01-03T01:00:00Z"}';`);
   await db.exec(await readFile(path.join(root, "supabase/migrations/20261113140000_pipeline_clear.sql"), "utf8"));
+  for (const name of ["20261113220000_pipeline_dead_letters.sql", "20261113220200_dead_letter_clear.sql"]) {
+    await db.exec(await readFile(path.join(root, "supabase", "migrations", name), "utf8"));
+  }
   await db.query(`INSERT INTO pipeline_control.jobs(id,status,job,key_expires_at,executor)
     VALUES ($1,'failed','{}',now(),'supabase')`, [old]);
   await db.query(`INSERT INTO pipeline_control.operations(job_id,name,status,result)

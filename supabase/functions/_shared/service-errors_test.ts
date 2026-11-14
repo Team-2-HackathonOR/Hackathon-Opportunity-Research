@@ -1,4 +1,4 @@
-import { HttpError, safeError } from "./runtime.ts";
+import { HttpError, PipelineFailure, safeError } from "./runtime.ts";
 import { StorageError, storageErrors, storageFailure, serviceJson } from "./service-errors.ts";
 import { pipelineConflict, type Conflict } from "./pipeline-conflicts.ts";
 
@@ -14,9 +14,15 @@ Deno.test("Storage failures reach pipeline errors without forwarding credentials
     let caught: unknown;
     try { await serviceJson(Response.json({ ...failure, error: secret }, { status: 500 })); }
     catch (error) { caught = error; }
-    assert(caught instanceof HttpError && caught.status === 502 && caught.message.includes(`[${code}]`),
+    assert(caught instanceof PipelineFailure && caught.status === 503 && caught.code === code &&
+      caught.disposition === "uncertain" && caught.message.includes(`[${code}]`),
       "Targeted service error was lost before reaching pipeline progress.");
     assert(caught instanceof Error && !caught.message.includes("private-"), "Private upstream details leaked.");
+    let legacy: unknown;
+    try { await serviceJson(Response.json({ code, error: secret }, { status: 500 })); }
+    catch (error) { legacy = error; }
+    assert(legacy instanceof HttpError && legacy.status === 502 && legacy.message.includes(`[${code}]`) &&
+      !legacy.message.includes("private-"), "Legacy Storage diagnostics changed or exposed raw details.");
   }
 });
 

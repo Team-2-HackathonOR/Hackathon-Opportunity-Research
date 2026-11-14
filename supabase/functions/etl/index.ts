@@ -3,15 +3,16 @@ import { ZodError } from "npm:zod@3.25.76";
 import { authorize, HttpError, json, readJson, safeError } from "../_shared/runtime.ts";
 import { stagingStore,type StagingStore } from "../_shared/staging-storage.ts";
 import { StorageError,storageFailure } from "../_shared/service-errors.ts";
-import { eventSchema, storageImportSchema, type RawRecord } from "../_shared/etl/schema.ts";
+import { eventSchema, storageImportSchema, validationIssues, type RawRecord } from "../_shared/etl/schema.ts";
 import { buildBaseEvent } from "../_shared/etl/normalization-base.ts";
 import { normalizeWithAi } from "../_shared/etl/normalization.ts";
 import { createEvent, createTeamMember } from "../_shared/etl/writer.ts";
+import { importPipelineRecord } from "../_shared/etl/pipeline-import.ts";
 
 export function etlPath(url: string): string {
   let path = new URL(url).pathname.replace(/^\/functions\/v1\/etl(?=\/|$)/, "");
   if (path === "/etl") return "/";
-  if (/^\/etl\/(?:etl\/|events(?:\/|$)|team-members(?:\/|$))/.test(path)) path = path.slice(4);
+  if (/^\/etl\/(?:etl\/|health(?:\/|$)|events(?:\/|$)|team-members(?:\/|$))/.test(path)) path = path.slice(4);
   return path || "/";
 }
 const isRecord = (value: unknown): value is RawRecord => !!value && typeof value === "object" && !Array.isArray(value);
@@ -42,7 +43,8 @@ async function importRecords(records: RawRecord[], source: string, useAi: boolea
   importLimit(records, useAi);
   if (useAi && !key.trim()) throw new HttpError(503, "AI_API_KEY is required when AI normalization is enabled.");
   const successes: { record_index: number; source_identifier: string | null; event_id: number; event_name: string }[] = [];
-  const failures: { record_index: number; source_identifier: string | null; reason: string }[] = [];
+  const failures: { record_index: number; source_identifier: string | null; reason: string;
+    validation_errors?: ReturnType<typeof validationIssues> }[] = [];
   const deadline = Date.now() + 100000;
   for (const [record_index, raw] of records.entries()) {
     const identifier = ["id", "event_name", "title", "name", "url"].map((k) => raw[k]).find((v) => v !== null && v !== undefined && String(v).trim());
@@ -55,10 +57,13 @@ async function importRecords(records: RawRecord[], source: string, useAi: boolea
       successes.push({ record_index, source_identifier, event_id: event.event_id, event_name: event.event_name });
     } catch (error) {
       const integrity = error instanceof Error && "code" in error && typeof error.code === "string" && error.code.startsWith("23");
-      if (!(error instanceof ZodError) && !(error instanceof HttpError) && !integrity) throw error;
-      console.warn("ETL record failed.", { record_index, kind: error instanceof Error ? error.name : "unknown" });
+      if (error instanceof HttpError && error.status === 503 ||
+          !(error instanceof ZodError) && !(error instanceof HttpError) && !integrity) throw error;
+      const details = error instanceof ZodError ? { validation_errors: validationIssues(error) } : {};
+      console.warn("ETL record failed.", { record_index, kind: error instanceof Error ? error.name : "unknown", ...details });
       failures.push({ record_index, source_identifier, reason: error instanceof HttpError ? error.message
-        : error instanceof ZodError ? "Record does not satisfy the event schema." : "Database integrity error while inserting the event." });
+        : error instanceof ZodError ? "Record does not satisfy the event schema." : "Database integrity error while inserting the event.",
+        ...details });
     }
   }
   return { source, processed_count: records.length, inserted_count: successes.length, failed_count: failures.length, successes, failures, next_after_id: null as number | null };
@@ -71,7 +76,10 @@ export function createETLHandler(overrides: { store?: StagingStore; importer?: t
   try {
     authorize(request);
     const path = etlPath(request.url);
-    if (request.method === "GET" && (path === "/" || path === "/health")) return json({ detail: "Hackathon Research ETL API is running." });
+    if ((request.method === "GET" && (path === "/" || path === "/health")) ||
+        request.method === "POST" && path === "/health") return json({
+      detail: "Hackathon Research ETL API is running.", capabilities: { pipelineReceipts: 1 },
+    });
     if (request.method !== "POST") throw new HttpError(404, "Unknown ETL route.");
     const apiKey = request.headers.get("x-ai-api-key")?.trim() || Deno.env.get("AI_API_KEY")?.trim() || "";
     if (apiKey.length > 4096) throw new HttpError(400, "The AI API key is too long.");
@@ -85,10 +93,19 @@ export function createETLHandler(overrides: { store?: StagingStore; importer?: t
       if (payload.cursor_mode && (!payload.fetched_at || payload.limit !== 1)) throw new HttpError(400, "Cursor imports require fetched_at and a one-record limit.");
       const max = payload.use_ai_normalization ? 1 : 25;
       if (payload.limit === null || payload.limit > max) throw new HttpError(400, `Edge Storage imports require limit <= ${max}. Use cursor_mode for a full run.`);
+      if (payload.pipeline_job_id && payload.pipeline_operation && payload.pipeline_execution_id && payload.fetched_at) {
+        return json(await importPipelineRecord({
+          pipeline_job_id: payload.pipeline_job_id, pipeline_operation: payload.pipeline_operation,
+          pipeline_execution_id: payload.pipeline_execution_id, fetched_at: payload.fetched_at, after_id: payload.after_id,
+        }, () => store.read(payload.fetched_at, payload.after_id, 1), payload.use_ai_normalization, apiKey,
+        payload.primary_researcher_id, payload.verifier_id));
+      }
       const records = await store.read(payload.fetched_at, payload.after_id, payload.limit);
       const result = await importer(records, "storage", payload.use_ai_normalization, apiKey, payload.primary_researcher_id, payload.verifier_id);
       if (payload.cursor_mode && records.length) result.next_after_id = records[records.length - 1].id;
-      return json(result);
+      return json(payload.cursor_mode ? { ...result, failures: result.failures.map((failure) => ({
+        ...failure, raw_record: records[failure.record_index],
+      })) } : result);
     }
     if (path === "/etl/import/file") {
       if (Number(request.headers.get("content-length")) > 1_000_000) throw new HttpError(413, "File request exceeds 1 MB.");

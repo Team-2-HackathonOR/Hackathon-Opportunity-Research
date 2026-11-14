@@ -1,8 +1,8 @@
 $("#pipeline-clear").addEventListener("click", async () => {
   if (!authenticated || scraping || stoppingPipeline) return;
-  if (!confirm("Clear ALL pipeline data and history? This permanently deletes staged scraper records, event listings, all pipeline runs and operation records. Automatic runs will be disabled. Accounts, submissions and reviews are preserved. No new scraping or ETL will start. This cannot be undone.")) return;
+  if (!confirm("Clear ALL pipeline data and history? This permanently deletes staged scraper records, event listings, dead letters, all pipeline runs and operation records. Automatic runs will be disabled. Accounts, submissions and reviews are preserved. No new scraping or ETL will start. This cannot be undone.")) return;
   stoppingPipeline = true;
-  for (const id of ["pipeline-clear", "pipeline-stop", "pipeline-reset", "pipeline-continue", "scraper-run"]) $(`#${id}`).disabled = true;
+  for (const id of ["pipeline-clear", "pipeline-stop", "pipeline-reset", "pipeline-continue", "pipeline-next-step", "scraper-run"]) $(`#${id}`).disabled = true;
   clearTimeout(pipelineTimer);
   $("#scraper-api-key").value = "";
   try {
@@ -22,6 +22,7 @@ $("#pipeline-clear").addEventListener("click", async () => {
     $("#pipeline-stop").disabled = !scraping;
     $("#pipeline-reset").disabled = scraping;
     $("#pipeline-continue").disabled = scraping;
+    $("#pipeline-next-step").disabled = scraping;
     $("#scraper-run").disabled = scraping;
     if (authenticated) pipelineTimer = setTimeout(loadPipeline, 3000);
   }

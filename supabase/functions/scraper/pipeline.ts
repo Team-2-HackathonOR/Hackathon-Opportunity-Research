@@ -6,12 +6,15 @@ import { MAX_RUN_RECORDS } from "./scraper-io.ts";
 import { advanceStorageReset,isResetAcknowledgement,resetOperationName,type ResetAcknowledgement } from "./reset-step.ts";
 import { resumeJob } from "../_shared/pipeline-resume.ts";
 import { finishClear } from "../_shared/pipeline-clear.ts";
+import { archiveFailedImport, type ImportAcknowledgement } from "../_shared/pipeline-dead-letters.ts";
+import { RetryScheduled } from "../_shared/pipeline-retry.ts";
+import { verifyStagedCount } from "../_shared/staging-storage.ts";
 
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const count = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0;
 type PgReset = { reset: true; deletedEvents: number };
 type Scrape = { persisted: true; fetchedAt: string; pagesPersisted: number; runUniqueHackathonsPersisted: number; paginationAnalysis: { totalPages: number } };
-type Import = { processed_count: number; inserted_count: number; failed_count: number; next_after_id: number | null };
+type Import = ImportAcknowledgement;
 
 export async function tick(request: Request) {
   await expireJobs();
@@ -99,22 +102,28 @@ export async function tick(request: Request) {
         job.steps.etl.status = "running";
         job.steps.etl.startedAt ??= new Date().toISOString();
         const afterId = job.cursor.afterId;
-        const result = await operation<Import>(row, `etl-${afterId ?? "first"}`, async () => {
+        const name = `etl-${afterId ?? "first"}`;
+        const result = await operation<Import>(row, name, async () => {
           const target = new URL("/api/internal/etl/etl/import/storage", env("AUTH_GATEWAY_URL"));
           if (target.protocol !== "https:" && Deno.env.get("ALLOW_LOCAL_GATEWAY") !== "true") throw new HttpError(503, "Pipeline gateway requires HTTPS.");
           return await serviceJson(await fetch(target, {
             method: "POST", redirect: "error", signal: AbortSignal.timeout(110000),
             headers: { "content-type": "application/json", "x-gateway-caller": "team-2-gateway",
               "x-gateway-secret": env("GATEWAY_INTERNAL_SECRET"), "x-ai-api-key": key },
-            body: JSON.stringify({ fetched_at: timestamp, limit: 1, cursor_mode: true, after_id: afterId, use_ai_normalization: true }),
+            body: JSON.stringify({ fetched_at: timestamp, limit: 1, cursor_mode: true, after_id: afterId, use_ai_normalization: true,
+              ...(job.etlReceiptVersion === 1 ? { pipeline_job_id: row.id, pipeline_operation: name,
+                pipeline_execution_id: row.execution_id } : {}) }),
           }));
-        }, (v): v is Import => record(v) && count(v.processed_count) && v.processed_count <= 1 &&
+        }, (v): v is Import => record(v) && (job.etlReceiptVersion !== 1 || v.receipt_bound === true) &&
+          count(v.processed_count) && v.processed_count <= 1 &&
           count(v.inserted_count) && count(v.failed_count) && v.inserted_count + v.failed_count === v.processed_count &&
           (v.processed_count === 0 || count(v.next_after_id) && (afterId === null || v.next_after_id > afterId)));
+        if (result.failed_count) await archiveFailedImport(row, name, result);
         const totals = job.etl ?? { processed: 0, inserted: 0, failed: 0 };
-        job.etl = { processed: totals.processed + result.processed_count, inserted: totals.inserted + result.inserted_count, failed: totals.failed + result.failed_count };
-        if (result.failed_count) throw new HttpError(502, "An ETL record failed. Successful inserts remain; inspect logs before retrying.");
+        job.etl = { processed: totals.processed + result.processed_count, inserted: totals.inserted + result.inserted_count,
+          failed: totals.failed + result.failed_count, deadLettered: (totals.deadLettered ?? 0) + result.failed_count };
         if (result.processed_count === 0) {
+          if (job.etlReceiptVersion === 1) await verifyStagedCount(timestamp);
           if (job.etl.processed !== job.scraper?.uniqueHackathonsPersisted) throw new HttpError(502, "ETL count does not match the scraped run. Inspect the Storage staging bucket and run timestamp.");
           job.status = "completed"; job.stage = "done"; job.finishedAt = new Date().toISOString();
           job.steps.etl.status = "completed"; job.steps.etl.finishedAt = job.finishedAt;
@@ -123,8 +132,16 @@ export async function tick(request: Request) {
       }
       default: throw new HttpError(503, "Pipeline cursor is invalid.");
     }
+    delete job.retry;
     await publishJob(row, job);
   } catch (error) {
+    if (error instanceof RetryScheduled) {
+      job.status = "running"; job.retry = error.checkpoint;
+      job.steps[job.stage].status = "retrying";
+      await publishJob(row, job);
+      return json({ ok: true, active: true, retry: error.checkpoint });
+    }
+    delete job.retry;
     console.error("Pipeline step failed.", { jobId: row.id, phase: job.cursor.phase, kind: error instanceof Error ? error.name : "unknown" });
     await publishJob(row, failedJob(job, diagnosticError(error)?.message ??
       "Pipeline operation could not complete; its outcome may be uncertain. Inspect logs before retrying."));

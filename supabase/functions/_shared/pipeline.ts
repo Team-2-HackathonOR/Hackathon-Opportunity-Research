@@ -1,21 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { db, HttpError } from "./runtime.ts";
-import { executeOperation } from "./operation.ts";
+export { operation } from "./pipeline-operations.ts";
+import type { RetryCheckpoint } from "./pipeline-retry.ts";
 import { encryptKey, decryptKey } from "./pipeline-keys.ts";
 import { pipelineConflict, type Conflict } from "./pipeline-conflicts.ts";
+import { preflightPipeline } from "./pipeline-preflight.ts";
 export { encryptKey, decryptKey } from "./pipeline-keys.ts";
 
 type Step = { status: string; startedAt?: string; finishedAt?: string };
 export type Job = {
   id: string; status: string; stage: string; startedAt: string; finishedAt?: string; error?: string;
   cancelled?: boolean; executionState?: "waiting" | "executing";
+  retry?: RetryCheckpoint; etlReceiptVersion?: 1;
   stagingBackend?: "supabase-storage"; purpose?: "clear";
   reset: Record<string, number>; steps: Record<string, Step>;
-  scraper?: { pagesPersisted: number; uniqueHackathonsPersisted: number };
-  etl?: { processed: number; inserted: number; failed: number };
+  scraper?: { pagesPersisted: number; uniqueHackathonsPersisted: number; endedEarly?: boolean };
+  etl?: { processed: number; inserted: number; failed: number; deadLettered?: number };
   cursor: { phase: string; page: number; afterId: number | null; resetBatch?: number };
 };
-type Row = {
+export type Row = {
   id: string; status: string; job: Job; key_ciphertext: string | null; key_expires_at: Date;
   execution_id: string | null;
 };
@@ -68,6 +71,7 @@ export async function cancelJob(id: string) {
 }
 
 export async function createJob(key: string, scheduled = false, restartId?: string) {
+  const etlReceiptVersion = await preflightPipeline();
   return await db().begin(async (sql) => {
     const [row] = await sql<{ value: Schedule }[]>`SELECT value FROM pipeline_control.schedule WHERE singleton=true FOR UPDATE`;
     if (!row) throw new HttpError(503, "Apply the pipeline control migration.");
@@ -77,9 +81,8 @@ export async function createJob(key: string, scheduled = false, restartId?: stri
     ) AS present, EXISTS (
       SELECT 1 FROM cron.job WHERE jobname='hackscout-edge-tick' AND active
     ) AS configured`;
-    if (!worker.configured) throw new HttpError(503, worker.present
-      ? "Pipeline worker cron hackscout-edge-tick is paused. Re-enable the existing job only when ready for queued cleanup to execute."
-      : "Pipeline worker cron hackscout-edge-tick does not exist. Configure Vault and register this cron job before starting a run.");
+    if (!worker.present) throw new HttpError(503, "Pipeline worker cron does not exist. Configure Vault and register it before starting.");
+    if (!worker.configured && scheduled) return null;
     const conflicts = await sql<Conflict[]>`SELECT j.id,j.status,j.executor,j.blocked_until>now() AS blocked,
       (SELECT name FROM pipeline_control.operations WHERE job_id=j.id AND status='started' ORDER BY name LIMIT 1) AS operation
       FROM pipeline_control.jobs j WHERE j.status IN ('queued','running') OR j.blocked_until>now() OR j.id=${restartId ?? null}::uuid
@@ -90,9 +93,11 @@ export async function createJob(key: string, scheduled = false, restartId?: stri
       const [restart] = await sql<{ ready: boolean }[]>`SELECT pipeline_control.prepare_edge_restart(${restartId}::uuid) AS ready`;
       if (!restart.ready) throw new HttpError(409, "The pipeline state changed while preparing the restart. Refresh its status and review the current run before retrying.");
     }
+    if (!worker.configured) await sql`SELECT cron.alter_job(
+      (SELECT jobid FROM cron.job WHERE jobname='hackscout-edge-tick'),active:=true)`;
     const id = randomUUID();
     const startedAt = new Date().toISOString();
-    const job: Job = { id, status: "queued", stage: "reset", reset: {}, startedAt, stagingBackend: "supabase-storage",
+    const job: Job = { id, status: "queued", stage: "reset", reset: {}, startedAt, stagingBackend: "supabase-storage", etlReceiptVersion,
       steps: { reset: { status: "waiting" }, scraper: { status: "waiting" }, etl: { status: "waiting" } },
       cursor: { phase: "reset-storage", page: 1, afterId: null } };
     const ciphertext = encryptKey(key, id);
@@ -115,6 +120,7 @@ export async function claimJob() {
     SET status='running',execution_id=${token},execution_until=now()+interval '10 minutes'
     WHERE id=(SELECT id FROM pipeline_control.jobs WHERE executor='supabase'
       AND status IN ('queued','running') AND (execution_until IS NULL OR execution_until<=now())
+      AND (job->'retry'->>'nextAttemptAt' IS NULL OR (job->'retry'->>'nextAttemptAt')::timestamptz<=now())
       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
     RETURNING id,status,job,key_ciphertext,key_expires_at,execution_id`;
   return row ?? null;
@@ -155,27 +161,6 @@ export async function expireJobs() {
     }
   });
   await db()`UPDATE pipeline_control.jobs SET key_ciphertext=NULL WHERE key_expires_at<=now()`;
-}
-export async function operation<T>(row: Row, name: string, run: () => Promise<unknown>, validate: (v: unknown) => v is T): Promise<T> {
-  return await executeOperation(name, {
-    start: () => db().begin(async (sql) => {
-      const active = await sql`SELECT id FROM pipeline_control.jobs WHERE id=${row.id}
-        AND execution_id=${row.execution_id} AND status IN ('queued','running') AND key_expires_at>now() FOR UPDATE`;
-      if (!active.length) throw new HttpError(409, "Pipeline is no longer active or its key expired.");
-      const inserted = await sql`INSERT INTO pipeline_control.operations(job_id,name,status)
-        VALUES (${row.id},${name},'started') ON CONFLICT DO NOTHING RETURNING name`;
-      return inserted.length > 0;
-    }),
-    read: async () => {
-      const [saved] = await db()<{ status: string; result: unknown }[]>`SELECT status,result
-        FROM pipeline_control.operations WHERE job_id=${row.id} AND name=${name}`;
-      return saved;
-    },
-    complete: async (result) => {
-      await db()`SELECT pipeline_control.complete_edge_operation(
-        ${row.id}::uuid,${name},${db().json(JSON.parse(JSON.stringify(result)))})`;
-    },
-  }, run, validate);
 }
 export function rowKey(row: Row) {
   if (!row.key_ciphertext || new Date(row.key_expires_at).getTime() <= Date.now()) throw new HttpError(409, "Pipeline key expired.");

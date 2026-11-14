@@ -2,7 +2,7 @@
 
 Two Deno Edge Functions replace the scraper and Python ETL services:
 
-- `scraper`: Devpost mapping, AI pagination, private Storage persistence/cache/reset,
+- `scraper`: Devpost mapping, deterministic pagination with AI fallback, private Storage persistence/cache/reset,
   pipeline control and one durable pipeline step per tick.
 - `etl`: Storage imports, JSON/JSONL/CSV file imports, AI website enrichment,
   validation, and transactional creation of events, children and team members.
@@ -22,6 +22,7 @@ Admin -> frontend -> main gateway -> scraper pipeline API -> PostgreSQL job
 pg_cron -> pg_net -> main gateway -> scraper pipeline tick
 tick -> one staging Storage reset / PostgreSQL reset / scrape page / ETL record
 ETL step -> main gateway -> etl function -> private Storage + PostgreSQL
+Confirmed failed record -> private PostgreSQL dead-letter queue -> admin review
 ```
 
 No background promise or function-to-function HTTP bypass is used. A tick every
@@ -74,6 +75,29 @@ gateway route avoids a second frontend/backend/gateway round trip.
    clearing. A failed cleanup retains history; after inspecting its outcome,
    use Clear all again rather than Continue. Deploying this migration alone
    neither queues cleanup nor deletes records.
+   For dead-letter continuation, apply these migrations in order:
+   `../migrations/20261113220000_pipeline_dead_letters.sql`,
+   `../migrations/20261113220100_dead_letter_resume.sql`, and
+   `../migrations/20261113220200_dead_letter_clear.sql`.
+   They create private queue storage and update Continue/Clear all, without
+   altering existing jobs or starting a run. Deploy ETL first, then the scraper
+   worker, then the admin UI. Old completed failure acknowledgements remain
+   replayable; outstanding operations remain interlocked.
+   Apply `../migrations/20261113220300_pipeline_next_step.sql` for the stopped
+   scraper's **Go to next step** control. This only defines guarded advancement;
+   applying it does not stop, advance or restart any existing run.
+   For fault-tolerant processing, also apply, in order:
+   `../migrations/20261113220400_staging_index.sql`,
+   `../migrations/20261113220500_etl_receipts.sql`, and
+   `../migrations/20261113220600_pipeline_recovery.sql`.
+   Roll out with empty staging and no active runs; the index deliberately does
+   not silently backfill legacy objects. Deploy receipt-aware ETL before the
+   scraper, then the admin UI. Leave cron and automatic scheduling disabled
+   during rollout. An explicit Start or Continue checks schema, private bucket
+   and gateway-routed ETL readiness, then enables the existing worker cron in
+   the same admission transaction. This does not enable automatic scheduling.
+   Deploy the gateway's protected `POST /api/internal/etl/health` allowlist
+   before enabling runs; readiness uses the same server-only gateway guard.
 3. Configure both functions' server secrets using `.env.example` as the inventory.
    Set `AUTH_GATEWAY_URL` to the HTTPS origin of the deployed **main gateway**.
    The scraper requires this setting to send ETL imports through the gateway.
@@ -166,6 +190,37 @@ gateway route avoids a second frontend/backend/gateway round trip.
 
 No deployment or destructive run is implicit in these steps. An actual manual
 or automatic pipeline still permanently resets its Storage staging records and event listings.
+
+## Failure recovery
+
+Each operation gets at most four attempts per retry cycle. Confirmed-safe
+transient failures retain the same run, cursor and encrypted key and retry after
+5, 10 and 20 seconds (requested delays are capped at 60 seconds). Provider
+authorization/configuration failures pause immediately. Exhausted safe failures
+have an explicit negative outcome; Continue starts a new bounded retry cycle
+without erasing the attempt audit. Unknown scraper/Storage mutation outcomes
+remain interlocked rather than being blindly replayed.
+
+Pipeline ETL uses job-bound receipts: lease/cursor/source checks fence stale
+workers, and an event plus its successful acknowledgement commit atomically.
+A lost response replays the saved receipt before Storage reads or AI calls.
+Serialized JSON parameters bind as text before casting to JSONB, preventing
+the PostgreSQL driver's inferred JSON serializer from encoding them twice.
+Receipt tests use inferred parameter types to reproduce that wire behavior.
+BIGINT event IDs are checked for safe integer conversion before entering numeric
+receipts; an unrepresentable identifier pauses and rolls back the transaction.
+Receipt fixtures also emulate the driver's string-valued BIGINT results.
+Permanent record failures are archived before cursor advancement; provider
+outages do not send the entire input to the dead-letter queue. Stopping fenced
+ETL reconciles committed receipts without reviving the cancelled run.
+
+Private staging metadata reserves upload intent before mutation and confirms
+it only after an exact Storage acknowledgement. Indexed numeric cursors avoid
+relisting the prefix for every imported record. Pending intents or mismatched
+downloads fail explicitly. Next-stage advancement and terminal completion also
+verify the physical object names against the index. Ambiguous reset DELETEs are
+not blindly resent: the exact planned paths must be verified absent before
+cleanup progress is acknowledged.
 Accounts, suggestions/review history, categories, and team members are preserved.
 
 ### Queued runs and stopping
@@ -215,6 +270,21 @@ scrape and ETL sequence. Stop admission and new enqueue share one transaction;
 if enqueue fails, the old run is unchanged. Stale targets, other active runs and
 uncertain-operation interlocks are rejected, never cleared by the button.
 
+**Go to next step** appears after **Stop pipeline** during scraping. Unlike
+Continue, it intentionally ends scraping and queues ETL on the same run using
+only the already-staged records. It requires an administrator, a replacement
+key and explicit `ADVANCE TO ETL` confirmation at `POST /pipeline/next-step`.
+The server counts the original run's Storage records and requires an exact
+matching completed scrape acknowledgement. A page finishing after Stop is
+reconciled from its acknowledgement, not silently lost.
+Both reset cleanups must already be confirmed. Outstanding operations, active
+leases, blockers, obsolete runs, changed staging counts/timestamps and inactive
+cron prevent advancement; neither reset nor ETL records can be skipped.
+No data or operation history is deleted. `advanceHistory` records the transition,
+and `scraper.endedEarly` plus the admin step label explicitly report shortened
+scraping. Continue still resumes normal scraping; after advancing, it preserves
+the intentionally ended scraper state if ETL is subsequently paused.
+
 ### Storage objects and migration
 
 The staging prefix owns JSON objects named `<run-unix-ms>_<16-digit-source-id>.json`.
@@ -244,6 +314,16 @@ New jobs are marked `stagingBackend: "supabase-storage"` and use `reset-storage`
 ## Bounds and recovery
 
 - Scraping requires `maxPages=1` per persistence request.
+- New scrape results discard submission periods ending before the UTC scrape day.
+  Ongoing events and periods ending on that day remain eligible. Pipeline pages
+  use the original run timestamp, so crossing midnight does not move the cutoff.
+  English month/day ranges and explicit ISO dates are calendar-validated; missing
+  years, unknown formats and invalid dates are retained, never assigned a guessed
+  year. The response and operation acknowledgement include `dateFilter` with
+  `cutoffDate`, `sourceRecords`, `expiredDiscarded` and `unknownDatesRetained`.
+  Filtering happens before Storage writes and the 9,998-record cap, without
+  changing source pagination. Existing staged records, cache reads and imported
+  events are not filtered or deleted retroactively.
 - Each Edge run admits at most **9,998 unique source IDs** before Storage uploads.
   Duplicate IDs update their existing records without using another slot.
   A page crossing the cap persists only the IDs that fit; the pipeline completes
@@ -271,7 +351,49 @@ New jobs are marked `stagingBackend: "supabase-storage"` and use `reset-storage`
   expiry it fails the job and blocks new runs with an infinite interlock.
 - Keys are AES-256-GCM encrypted with the job UUID as authenticated data, expire
   after 24 hours, and are erased on completion/failure/expiry. Backups can retain
-  old ciphertext. Only safe errors and aggregate counts are persisted.
+  old ciphertext. Error diagnostics never include keys or invalid AI values.
+  Confirmed failed source records are preserved privately in the operation
+  acknowledgement and dead-letter queue, not in logs or public listings.
+
+### Dead-letter continuation
+
+Pipeline cursor imports continue after confirmed per-record schema, bounded
+processing-budget, or transactional integrity failures. The internal ETL
+acknowledgement includes the original failed source. Before adding totals or
+advancing the cursor, the worker durably archives that source and safe error
+metadata in `pipeline_control.dead_letters`, uniquely keyed by run and operation.
+Replayed acknowledgements reuse the same entry; changed payloads are refused.
+A failed archive leaves the cursor and counters unchanged. Successful event
+inserts are never repeated just to recover a checkpoint.
+
+Unknown database/write outcomes, transport failures, missing configuration, and
+provider HTTP failures (including invalid credentials, throttling and outages)
+still pause the run; they do not create thousands of misleading dead letters.
+Persistent record validation failures retain at most 20 field paths/error codes.
+Completion with failures visibly reports dead letters instead of clean success.
+
+The admin **Dead-letter queue** shows pending diagnostics in pages of 20 and
+lets an administrator view the original record. Gateway routes:
+`GET /api/hackscout/admin/pipeline/dead-letters?beforeId=ID` returns
+`{items,total,nextBeforeId}`; `GET /api/hackscout/admin/pipeline/dead-letters/ID`
+returns `{item}`, including `raw_record`. Direct, viewer and key-only internal
+callers cannot read this queue. Responses are not cached. There is no automatic
+retry/discard or mutation endpoint: records await explicit instructions.
+
+Normal manual/automatic runs, Stop, Continue and Reset & restart retain dead
+letters independently of staging and job history. **Clear all** explicitly
+includes the queue, removing it in the same transaction as job/operation
+history only after confirmed Storage and event cleanup. Its existing active
+lease, unknown-operation and event-change guards still apply.
+
+For a legacy checkpoint that already counted one confirmed zero-insert failure
+without advancing, Continue keeps its acknowledgement and audits the previous
+totals in `resumeHistory`. It undoes only that counted attempt so the same
+acknowledgement can replay into the queue, without another AI request or event
+write. If the acknowledgement predates source retention, a bounded read must
+recover the exact staged ID and original run timestamp before archival.
+Unavailable/changed source data pauses again rather than being silently skipped.
+Already archived failures behind the cursor do not prevent Continue.
 
 Inspect remote logs and ensure no prior operation is still active before
 clearing the exact failed job's interlock:
@@ -281,8 +403,12 @@ UPDATE pipeline_control.jobs SET blocked_until=NULL
 WHERE id='FAILED-JOB-UUID' AND status='failed';
 ```
 
-Never delete the operation ledger to force a replay. Resets across databases are
-not atomic and the pipeline does not claim exactly-once remote mutations.
+Never delete unconfirmed operations to force a replay. Resets across databases
+are not atomic and the pipeline does not claim exactly-once remote mutations.
+Use Continue for confirmed per-record failures as described above; do not delete
+their acknowledgements or mark them successful. Retrying the failed source itself
+is a separate operator instruction, not part of Continue. Preserve successful
+acknowledgements, existing events and original staging provenance.
 
 ## Validation and code organization
 
@@ -292,6 +418,26 @@ deno task --config supabase/functions/deno.json test
 npm run check:code-size
 node --test scripts/test/research-schema.test.cjs
 ```
+
+The event-writer regression uses the existing HackScout PGlite dependency and
+the pinned PostgreSQL client's real SQL builders, without network/database access.
+It verifies linked source/track inserts and rollback when a child insert fails.
+Dynamic child tables must use one qualified identifier (`schema.table`);
+passing schema and table as separate helper arguments selects a value builder
+and raises `UNDEFINED_VALUE` instead of inserting the related records.
+
+Schema-invalid AI output receives at most one correction request using the
+original evidence and schema. Both AI requests share the existing 45-second
+budget; this can add one billable request for an invalid record. Correction
+never substitutes an unvalidated base event or retries a database write.
+Persistent validation failures retain at most 20 field paths and error codes
+in the operation acknowledgement and server logs, without invalid values or
+provider credentials. The pipeline archives the original failed source before
+advancing; successful inserts and acknowledgements remain untouched.
+AI application-requirement labels are case-normalized and known aliases retained.
+Unknown non-empty labels use the existing `other` classification, preserving the
+requirement text and adding a note plus a value-free warning. Missing, blank or
+non-string labels still fail validation; the direct event API schema stays strict.
 
 Code files are limited to 200 physical lines, including tests and SQL. The
 historical research migration is split into sequential files: a completion-view

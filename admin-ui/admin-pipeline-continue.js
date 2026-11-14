@@ -11,7 +11,7 @@ $("#pipeline-continue").addEventListener("click", async () => {
   if (!confirm(`Continue from the saved ${phase} checkpoint without starting over?${cleanup} An uncertain operation will block continuation.`)) return;
   stoppingPipeline = true;
   $("#pipeline-clear").disabled = true;
-  for (const selector of ["#pipeline-continue", "#pipeline-reset", "#pipeline-stop", "#scraper-run"]) $(selector).disabled = true;
+  for (const selector of ["#pipeline-continue", "#pipeline-next-step", "#pipeline-reset", "#pipeline-stop", "#scraper-run"]) $(selector).disabled = true;
   clearTimeout(pipelineTimer);
   $("#scraper-result").classList.remove("error");
   $("#scraper-result").textContent = `Continuing from ${phase}...`;
@@ -32,6 +32,7 @@ $("#pipeline-continue").addEventListener("click", async () => {
     stoppingPipeline = false;
     $("#pipeline-clear").disabled = scraping;
     $("#pipeline-continue").disabled = scraping;
+    $("#pipeline-next-step").disabled = scraping;
     $("#pipeline-reset").disabled = false;
     $("#pipeline-stop").disabled = !scraping;
     $("#scraper-run").disabled = scraping;

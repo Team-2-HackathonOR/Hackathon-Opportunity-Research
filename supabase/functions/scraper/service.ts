@@ -1,6 +1,7 @@
-import { json } from '../_shared/runtime.ts';
+import { json, PipelineFailure, failureDetails } from '../_shared/runtime.ts';
 import { StorageError,storageFailure } from '../_shared/service-errors.ts';
 import { parsePositiveInteger } from '../_shared/scraper/parsing.ts';
+import { filterNewHackathons } from '../_shared/scraper/dates.ts';
 import { buildDevpostUrl,defaults,Dependencies,loadPage,mapHackathon,MAX_CACHE_ITEMS,MAX_RUN_RECORDS,persist,validPipelineTimestamp } from './scraper-io.ts';
 
 export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
@@ -52,17 +53,22 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
       ? parsePositiveInteger(query.get('startPage')) ?? parsePositiveInteger(query.get('page')) ?? 1
       : parsePositiveInteger(query.get('page')) ?? 1;
     const sourceUrl = buildDevpostUrl(query, batch, batch ? startPage : undefined);
+    let mutationAttempted = false;
     try {
       const upstream = await loadPage(deps, sourceUrl);
       if (!upstream.ok) {
         return json({
           error: batch ? 'Failed to fetch the initial Devpost page for batch persistence.' : 'Failed to fetch hackathons from Devpost.',
           sourceUrl, statusCode: upstream.statusCode,
+          failure: { code: "SOURCE_HTTP_FAILED", disposition: [408,429,500,502,503,504].includes(upstream.statusCode) ? "retry" : "pause", retryAfterMs: 0 },
         }, 502);
       }
       const payload = upstream.body;
       const fetchedAt = batch && timestamp ? timestamp : deps.now();
-      const hackathons = payload.hackathons.map(mapHackathon);
+      const { hackathons, dateFilter } = filterNewHackathons(payload.hackathons.map(mapHackathon), fetchedAt);
+      if (dateFilter.expiredDiscarded || dateFilter.unknownDatesRetained) {
+        console.info("Scraper date filter applied.", dateFilter);
+      }
       const paginationAnalysis = await deps.analyze(payload, startPage, apiKey);
       if (batch && paginationAnalysis.totalPages === null) {
         return json({ error: 'The initial Devpost response did not expose enough pagination metadata to crawl all pages.', sourceUrl, paginationAnalysis }, 502);
@@ -73,9 +79,11 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
       const persistToStorage = batch || query.getAll('persist').some((value) => ['1', 'true', 'yes'].includes(value.toLowerCase()));
       let persistedHackathons = hackathons;
       if (persistToStorage) {
+        mutationAttempted = hackathons.length > 0;
         try {
           persistedHackathons = await persist(deps, hackathons, sourceUrl, fetchedAt);
         } catch (error) {
+          if (error instanceof StorageError && mutationAttempted) error.disposition = "uncertain";
           if (!batch) return json({ ...storageFailure(error), sourceUrl }, 500);
           return json({ ...storageFailure(error), sourceUrl,
             requestedStartPage: startPage, requestedMaxPages: 1, attemptedPage: startPage,
@@ -83,12 +91,12 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
             hackathonsPersisted: 0, uniqueHackathonsPersisted: 0, paginationAnalysis }, 500);
         }
       }
-      if (!batch) return json({ sourceUrl, fetchedAt, total: hackathons.length, paginationAnalysis, persisted: persistToStorage, hackathons });
+      if (!batch) return json({ sourceUrl, fetchedAt, total: hackathons.length, dateFilter, paginationAnalysis, persisted: persistToStorage, hackathons });
       const runUniqueHackathonsPersisted = timestamp
         ? await deps.store.count(fetchedAt)
         : undefined;
       return json({
-        sourceUrl, fetchedAt, requestedStartPage: startPage, requestedMaxPages: 1,
+        sourceUrl, fetchedAt, dateFilter, requestedStartPage: startPage, requestedMaxPages: 1,
         targetPageRange: { startPage, endPage: startPage }, pagesRequested: 1, pagesPersisted: 1,
         hackathonsPersisted: persistedHackathons.length, uniqueHackathonsPersisted: new Set(persistedHackathons.map((item) => item.id)).size,
         maxUniqueHackathons: MAX_RUN_RECORDS,
@@ -97,9 +105,16 @@ export function createScraperHandler(overrides: Partial<Dependencies> = {}) {
         cacheEndpoint: '/hackathons/cache',
       });
     } catch (error) {
-      if (error instanceof StorageError) return json({ ...storageFailure(error), sourceUrl }, 500);
-      console.error("Scraper request failed.", { kind: error instanceof Error ? error.name : "unknown" });
-      return json({ error: batch ? "Unexpected error while persisting a Devpost page." : "Unexpected error while scraping Devpost.", sourceUrl }, 500);
+      if (error instanceof StorageError) {
+        if (mutationAttempted) error.disposition = "uncertain";
+        return json({ ...storageFailure(error), sourceUrl }, 500);
+      }
+      const failure = mutationAttempted
+        ? new PipelineFailure(503, "SCRAPER_WRITE_UNCONFIRMED", "uncertain", "Scraper persistence was not confirmed.")
+        : error instanceof PipelineFailure ? error
+        : new PipelineFailure(502, "SOURCE_RESPONSE_INVALID", "pause", "Source response or pagination could not be validated before persistence.");
+      console.error("Scraper request failed.", { kind: error instanceof Error ? error.name : "unknown", ...failureDetails(failure) });
+      return json({ error: failure.message, sourceUrl, failure: failureDetails(failure) }, failure.status);
     }
   };
 }

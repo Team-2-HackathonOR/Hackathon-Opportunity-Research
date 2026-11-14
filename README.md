@@ -34,7 +34,9 @@ Run the root `npm run dev` and open
 `http://localhost:3001`. All application API calls go through the main gateway
 on port 4000. Listings, suggestions, and moderation use the Hackathon Service.
 Admin cookie sign-in is handled by the main gateway and JWT service; pipeline
-controls still use the protected HackScout API on port 3002.
+controls use the protected HackScout API in the legacy local launcher. Deployed
+pipeline controls route through the gateway to the Supabase scraper/ETL Edge
+Functions, with private Storage staging and PostgreSQL control/receipt tables.
 
 See [local setup](./docs/LOCAL-RUN.md) for the database migrations and the full service launcher, which serves the public UI on `http://localhost:3001`.
 
@@ -58,6 +60,20 @@ session cookies on the admin site's own origin. Update the rewrite destination
 if the main gateway domain changes. Redeploy the admin project after
 adding or changing this configuration; deploying only its static assets without
 the rewrite causes Vercel `NOT_FOUND` responses for admin API requests.
+
+## Testing and CI
+
+See [testing and CI](./docs/TESTING.md) for the complete coverage matrix,
+reproducible installation, local commands, and isolated runtime setup.
+`npm test` now includes all five Node components, SQL/control integration tests,
+and Deno Edge tests. Python suites run with `npm run test:python`.
+
+GitHub Actions runs Node 22/24, Python, schema/Edge integration, disposable
+PostgreSQL/Storage API journeys, then Chromium browser journeys. Vertical tests
+cover complete business flows; horizontal tests cover authentication boundaries,
+identity propagation, driver encoding, replay, and lease fencing.
+**Playwright execution is CI-only; it is not run locally.** These jobs never
+deploy, reset production, or require production secrets.
 
 ## Admin moderation
 

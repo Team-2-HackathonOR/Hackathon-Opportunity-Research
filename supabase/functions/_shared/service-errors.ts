@@ -1,4 +1,4 @@
-import { HttpError } from "./runtime.ts";
+import { HttpError, PipelineFailure, type FailureDisposition } from "./runtime.ts";
 
 export const storageErrors = {
   STORAGE_CONFIG_MISSING: "Storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the Edge runtime; keep the service-role key server-side.",
@@ -19,7 +19,8 @@ export const storageErrors = {
 } as const;
 
 export class StorageError extends HttpError {
-  constructor(public code: keyof typeof storageErrors, status: number) {
+  constructor(public code: keyof typeof storageErrors, status: number,
+    public disposition: FailureDisposition = "uncertain") {
     super(status, storageErrors[code]);
     this.name = "StorageError";
   }
@@ -32,7 +33,8 @@ function field(value: unknown, key: string): unknown {
 export function storageFailure(error: unknown) {
   const code = error instanceof StorageError ? error.code : "STORAGE_REQUEST_FAILED";
   console.error("Storage operation failed.", { code, kind: error instanceof StorageError ? "StorageError" : "unknown" });
-  return { code, error: storageErrors[code] };
+  return { code, error: storageErrors[code],
+    failure: { code, disposition: error instanceof StorageError ? error.disposition : "uncertain", retryAfterMs: 0 } };
 }
 
 export async function serviceJson(response: Response): Promise<unknown> {
@@ -47,6 +49,17 @@ export async function serviceJson(response: Response): Promise<unknown> {
     throw new HttpError(502, `Pipeline service returned HTTP ${response.status} without a valid JSON error. Inspect its logs.`);
   }
   const code = field(payload, "code");
+  const failure = field(payload, "failure");
+  const disposition = field(failure, "disposition");
+  const failureCode = field(failure, "code");
+  const retryAfter = field(failure, "retryAfterMs");
+  if (typeof failureCode === "string" && /^[A-Z][A-Z0-9_]{1,63}$/.test(failureCode) &&
+      (disposition === "retry" || disposition === "pause" || disposition === "uncertain") &&
+      typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0 && retryAfter <= 60000) {
+    const message = isStorageCode(failureCode) ? `[${failureCode}] ${storageErrors[failureCode]}`
+      : `Pipeline dependency failed (${failureCode}, HTTP ${response.status}).`;
+    throw new PipelineFailure(503, failureCode, disposition, message, retryAfter);
+  }
   if (isStorageCode(code)) {
     throw new HttpError(502, `[${code}] ${storageErrors[code]}`);
   }

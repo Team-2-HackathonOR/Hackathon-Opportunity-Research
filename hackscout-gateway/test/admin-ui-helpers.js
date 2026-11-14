@@ -49,6 +49,7 @@ function createPage(session, setupRequired, responses = {}, confirm = () => true
       if (action === "auth/logout") { session.signedIn = false; return Response.json({ ok: true }); }
       if (action === "pipeline") return Response.json({ job: null });
       if (action === "pipeline/schedule") return Response.json({ schedule: { frequency: "off", keyConfigured: false } });
+      if (action === "pipeline/dead-letters") return Response.json({ items: [], total: 0, nextBeforeId: null });
       if (action.startsWith("suggestions?")) return Response.json({ items: [], total: 0, pageSize: 12 });
       throw new Error(`Unexpected test request: ${action}`);
     },

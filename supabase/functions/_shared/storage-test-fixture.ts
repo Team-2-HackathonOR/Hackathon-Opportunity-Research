@@ -1,4 +1,5 @@
 import { objectRecord } from "./storage-http.ts";
+import { stagingIndexFixture } from "./staging-index-test-fixture.ts";
 
 export function storageFixture() {
   const variables = {
@@ -11,8 +12,9 @@ export function storageFixture() {
   for (const [name, value] of Object.entries(variables)) Deno.env.set(name, value);
   const original = globalThis.fetch;
   const objects = new Map<string, unknown>();
+  const index = stagingIndexFixture(objects);
   const calls: { method: string; path: string; body: unknown }[] = [];
-  const state = { public: false, badUploadAck: false, badDeleteAck: false, failureStatus: 0 };
+  const state = { public: false, badUploadAck: false, badDeleteAck: false, deleteKeepOne: false, failureStatus: 0 };
   globalThis.fetch = (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.origin !== variables.SUPABASE_URL) throw new Error("Unexpected network destination in Storage test.");
@@ -43,6 +45,7 @@ export function storageFixture() {
       const removed = [];
       for (const name of body.prefixes) {
         if (typeof name !== "string") throw new Error("Invalid removal path.");
+        if (state.deleteKeepOne && name === body.prefixes.at(-1)) continue;
         if (objects.delete(name)) removed.push({ name });
       }
       return reply(state.badDeleteAck ? [] : removed);
@@ -59,8 +62,9 @@ export function storageFixture() {
     throw new Error("Unexpected Storage API request.");
   };
   return {
-    objects, calls, state,
+    objects, calls, state, index,
     restore() {
+      index.restore();
       globalThis.fetch = original;
       for (const [name, value] of previous) {
         if (value === undefined) Deno.env.delete(name); else Deno.env.set(name, value);

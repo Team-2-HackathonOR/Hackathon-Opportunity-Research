@@ -30,7 +30,12 @@ logs/
 # Local Supabase CLI state
 /supabase/.temp/
 /supabase/.branches/
+/tests/runtime/supabase/.temp/
+/tests/runtime/supabase/.branches/
+/test-results/
+/playwright-report/
 
 # Operating system metadata
 .DS_Store
 Thumbs.db
+.vercel

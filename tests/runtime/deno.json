@@ -1,0 +1,7 @@
+{
+  "scopes": {
+    "../../supabase/functions/": {
+      "npm:postgres@3.4.7": "./postgres-local.ts"
+    }
+  }
+}

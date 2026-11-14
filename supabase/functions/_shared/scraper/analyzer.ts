@@ -86,6 +86,10 @@ export const analyzePagination = async (
   apiKeyOverride?: string,
 ): Promise<PaginationAnalysis> => {
   const fallbackAnalysis = analyzePaginationDeterministically(payload, requestedPage);
+  if (fallbackAnalysis.totalPages !== null && Number.isSafeInteger(fallbackAnalysis.totalPages) &&
+      fallbackAnalysis.totalPages >= requestedPage && fallbackAnalysis.confidence === "high") {
+    return fallbackAnalysis;
+  }
   const modelResponse = await requestPaginationModelResponse(
     payload,
     requestedPage,

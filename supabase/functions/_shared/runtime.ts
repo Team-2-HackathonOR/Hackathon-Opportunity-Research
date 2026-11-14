@@ -9,6 +9,19 @@ export class HttpError extends Error {
   }
 }
 
+export type FailureDisposition = "retry" | "pause" | "uncertain";
+export class PipelineFailure extends HttpError {
+  constructor(status: number, public code: string, public disposition: FailureDisposition,
+    message: string, public retryAfterMs = 0) {
+    super(status, message);
+    this.name = "PipelineFailure";
+  }
+}
+export function failureDetails(error: unknown) {
+  return error instanceof PipelineFailure
+    ? { code: error.code, disposition: error.disposition, retryAfterMs: error.retryAfterMs } : undefined;
+}
+
 export function env(name: string): string {
   const value = Deno.env.get(name)?.trim();
   if (!value) throw new HttpError(503, `Server configuration is missing ${name}.`);
@@ -56,9 +69,11 @@ export function safeError(error: unknown): Response {
     : undefined;
   console.error("Edge request failed.", {
     kind: error instanceof Error ? error.name : "unknown", status,
+    ...failureDetails(error),
     ...(reference ? { reference } : {}),
   });
-  return json({ error: error instanceof HttpError ? error.message : "The service could not complete this request. Check its logs." }, status);
+  return json({ error: error instanceof HttpError ? error.message : "The service could not complete this request. Check its logs.",
+    ...(failureDetails(error) ? { failure: failureDetails(error) } : {}) }, status);
 }
 
 let sql: ReturnType<typeof postgres> | undefined;

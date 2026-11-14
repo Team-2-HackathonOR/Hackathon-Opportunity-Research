@@ -24,10 +24,12 @@ function signOut() {
   clearTimeout(pipelineTimer);
   clearInterval(pipelineClock);
   pipelineJob = null;
+  resetDeadLetters();
   $("#pipeline-stop").disabled = true;
   $("#pipeline-clear").disabled = true;
   $("#pipeline-reset").hidden = true;
   $("#pipeline-continue").hidden = true;
+  $("#pipeline-next-step").hidden = true;
   $("#pipeline-progress").hidden = true;
   scraping = false;
   $("#scraper-run").disabled = false;

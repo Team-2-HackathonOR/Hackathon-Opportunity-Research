@@ -1,0 +1,39 @@
+project_id = "hackscout-ci"
+
+[api]
+enabled = true
+port = 54328
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54329
+shadow_port = 54330
+major_version = 17
+
+[db.migrations]
+enabled = false
+
+[db.seed]
+enabled = false
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = false
+
+[local_smtp]
+enabled = false
+
+[storage]
+enabled = true
+file_size_limit = "10MiB"
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:43104"
+
+[analytics]
+enabled = false

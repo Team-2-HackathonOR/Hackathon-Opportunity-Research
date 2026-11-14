@@ -1,4 +1,4 @@
-import { stagingStore } from "./staging-storage.ts";
+import { stagingStore, verifyStagedCount } from "./staging-storage.ts";
 import { StorageError, storageFailure } from "./service-errors.ts";
 import { storageFixture } from "./storage-test-fixture.ts";
 
@@ -39,6 +39,7 @@ Deno.test("Storage cleanup deletes only owned record objects and checks exact de
     assert(fixture.objects.size === 3, "Cleanup deleted unrelated files or folders.");
     await stagingStore.persist([{ id: 1, fetchedAt: first }]);
     fixture.state.badDeleteAck = true;
+    fixture.state.deleteKeepOne = true;
     await rejects(() => stagingStore.reset(), "STORAGE_MUTATION_UNCONFIRMED");
   } finally { fixture.restore(); }
 });
@@ -69,13 +70,18 @@ Deno.test("Storage refuses public buckets, bad configuration and unacknowledged 
   } finally { fixture.restore(); }
 });
 
-Deno.test("Storage listing paginates without silently truncating records", async () => {
+Deno.test("indexed cursors paginate without listing Storage, while physical verification lists only once per run", async () => {
   const fixture = storageFixture();
   try {
     const run = Date.parse(first);
     for (let id = 0; id < 1001; id++) fixture.objects.set(`hackscout/raw/${run}_${String(id).padStart(16, "0")}.json`, { id, fetchedAt: first });
     assert(await stagingStore.count(first) === 1001, "Only the first listing page was counted.");
     assert((await stagingStore.read(first, 999, 1))[0].id === 1000, "Cursor failed across the listing boundary.");
+    assert((await stagingStore.read(first, 1000, 1)).length === 0, "End cursor failed.");
+    assert((await stagingStore.ids(first)).size === 1001, "Index ID set lost records.");
+    assert(!fixture.calls.some((call) => call.path.startsWith("object/list/")), "Indexed cursor repeatedly listed physical Storage.");
+    assert(await verifyStagedCount(first) === 1001, "Physical/index verification lost a page.");
+    assert(fixture.calls.filter((call) => call.path.startsWith("object/list/")).length === 2, "Verifier did not issue exactly one paginated scan.");
   } finally { fixture.restore(); }
 });
 
