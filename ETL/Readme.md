@@ -1,5 +1,14 @@
 # ETL database schema and API
 
+> **Retired standalone service.** The Python FastAPI ETL and its MongoDB input
+> path have been replaced in the active pipeline by the Supabase `etl` Edge
+> Function and private Supabase Storage staging bucket. Do not start or deploy
+> this service, or configure its local environment file, for the current pipeline.
+> See the [Supabase Functions guide](../supabase/functions/README.md).
+> Source, schema assets and regression tests remain in this folder for reference.
+> The service setup and API instructions below describe the legacy implementation;
+> PostgreSQL remains the active destination for processed events.
+
 This folder contains:
 
 - the PostgreSQL schema for the Codyza hackathon-opportunity research workflow

@@ -23,7 +23,36 @@ The public UI follows the Hackathon Service's `after_event_id` cursor so saves
 beyond the first 100 listings are not incorrectly removed. **Clear browser data**
 removes all HackScout bookmark collections on the device, not unrelated storage.
 
+## Current ingestion architecture
+
+The standalone [Python ETL service](./ETL/Readme.md), [Express scraper
+service](./scraper/Readme.md), and MongoDB staging have been **retired from the
+active pipeline**.
+
+| Retired component | Active replacement |
+|---|---|
+| Python FastAPI ETL in `ETL/` | Supabase `etl` Edge Function |
+| Express scraper in `scraper/` | Supabase `scraper` Edge Function |
+| MongoDB staging collection | Private Supabase Storage bucket `hackscout-staging` (default), prefix `hackscout/raw` |
+
+Scraping and ETL remain active capabilities, now implemented by the Edge
+Functions. Requests go through the main gateway; raw records live in the private
+bucket, and processed events, staging indexes, job state, receipts and dead letters
+live in PostgreSQL. MongoDB and the standalone services are not required for this
+pipeline. Configure runtime secrets in Supabase, not in the retired services'
+local environment files.
+
+Legacy source, regression tests, Docker definitions and launcher commands remain
+in the repository for reference; their presence does not make them active
+deployment requirements. Follow the [Supabase Functions guide](./supabase/functions/README.md)
+for the current deployment and configuration.
+
 ## Run locally
+
+The all-services launcher below is **legacy** and still starts the retired ETL
+and scraper. It has not been changed by this documentation update. For current
+Edge pipeline setup, use the [Supabase Functions guide](./supabase/functions/README.md);
+for disposable local integration testing, use the [testing guide](./docs/TESTING.md).
 
 Configure the service environment files, including the same
 `GATEWAY_INTERNAL_SECRET` for the main gateway, HackScout API, scraper, and ETL.

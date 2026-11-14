@@ -7,6 +7,15 @@ Two Deno Edge Functions replace the scraper and Python ETL services:
 - `etl`: Storage imports, JSON/JSONL/CSV file imports, AI website enrichment,
   validation, and transactional creation of events, children and team members.
 
+The standalone [Express scraper](../../scraper/Readme.md), [Python ETL
+service](../../ETL/Readme.md), and MongoDB staging are **retired from the active
+pipeline**. Raw records now use the private Supabase Storage bucket
+`hackscout-staging` and prefix `hackscout/raw` by default (configurable through
+`STAGING_STORAGE_BUCKET` and `STAGING_STORAGE_PREFIX`). Processed events and
+durable pipeline metadata remain in PostgreSQL. Neither MongoDB nor the old
+services' local environment files are required; configure Edge runtime secrets
+in Supabase instead. Legacy code and regression tests remain for reference only.
+
 Every request, including health checks and OPTIONS, requires both the server-only
 `GATEWAY_INTERNAL_SECRET` and `x-gateway-caller: team-2-gateway`. Browser bearer
 tokens, Supabase public keys, origin headers, and caller-name spoofing do not

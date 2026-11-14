@@ -1,5 +1,11 @@
 # Testing and CI
 
+The standalone Python ETL, Express scraper and MongoDB staging are retired from
+the active pipeline. Their component tests remain as legacy regression coverage,
+not deployment requirements. Current ingestion integration/E2E journeys use the
+Supabase Edge Functions, private Storage bucket and PostgreSQL described in the
+[Functions guide](../supabase/functions/README.md).
+
 ## Testing strategy
 
 **Application type:** mixed HTTP APIs and browser-rendered HTML/JavaScript.
