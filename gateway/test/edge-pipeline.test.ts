@@ -35,24 +35,83 @@ it("routes admin controls directly to Edge, preserves function prefixes, and aut
   expect((await app.inject({ method: "POST", url: tick, headers: { ...internal, "x-gateway-secret": "spoofed" }, payload: {} })).statusCode).toBe(403);
   expect(seen).toHaveLength(0);
   expect((await app.inject({ method: "POST", url: tick, headers: internal, payload: {} })).statusCode).toBe(200);
+  const health = "/api/internal/etl/health";
+  expect((await app.inject({ method: "GET", url: health, headers: internal })).statusCode).toBe(403);
+  expect((await app.inject({ method: "POST", url: health, payload: {} })).statusCode).toBe(403);
+  expect((await app.inject({ method: "POST", url: health, headers: internal, payload: {} })).statusCode).toBe(200);
   const viewer = await signTestToken("viewer");
   stubTokenVerification();
   expect((await app.inject({
     url: "/api/hackscout/admin/pipeline", headers: { authorization: `Bearer ${viewer}` },
   })).statusCode).toBe(403);
+  for (const path of ["/dead-letters", "/dead-letters/9"]) {
+    expect((await app.inject({
+      url: `/api/hackscout/admin/pipeline${path}`, headers: { authorization: `Bearer ${viewer}` },
+    })).statusCode).toBe(403);
+  }
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/cancel",
+    headers: { authorization: `Bearer ${viewer}` }, payload: { jobId: "fixture" },
+  })).statusCode).toBe(403);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/restart",
+    headers: { authorization: `Bearer ${viewer}` }, payload: { jobId: "fixture", apiKey: "fixture" },
+  })).statusCode).toBe(403);
   const admin = await signTestToken("admin");
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/continue",
+    headers: { authorization: `Bearer ${viewer}` }, payload: { jobId: "fixture", apiKey: "fixture" },
+  })).statusCode).toBe(403);
   const headers = { authorization: `Bearer ${admin}` };
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/clear",
+    headers: { authorization: `Bearer ${viewer}` }, payload: { jobId: null, confirmation: "CLEAR ALL" },
+  })).statusCode).toBe(403);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/next-step",
+    headers: { authorization: `Bearer ${viewer}` }, payload: { jobId: "fixture", confirmation: "ADVANCE TO ETL" },
+  })).statusCode).toBe(403);
   expect((await app.inject({ url: "/api/hackscout/admin/pipeline", headers })).statusCode).toBe(200);
   expect((await app.inject({ url: "/api/hackscout/admin/pipeline/schedule", headers })).statusCode).toBe(200);
+  expect((await app.inject({ url: "/api/hackscout/admin/pipeline/dead-letters?beforeId=9", headers })).statusCode).toBe(200);
+  expect((await app.inject({ url: "/api/hackscout/admin/pipeline/dead-letters/8", headers })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/cancel", headers, payload: { jobId: "fixture" },
+  })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/restart", headers, payload: { jobId: "fixture", apiKey: "fixture" },
+  })).statusCode).toBe(200);
   expect((await app.inject({ method: "POST", url: "/api/etl/events", headers, payload: { event_name: "Test" } })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/continue", headers, payload: { jobId: "fixture", apiKey: "fixture" },
+  })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/clear", headers, payload: { jobId: null, confirmation: "CLEAR ALL" },
+  })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "POST", url: "/api/hackscout/admin/pipeline/next-step", headers,
+    payload: { jobId: "fixture", apiKey: "fixture", confirmation: "ADVANCE TO ETL" },
+  })).statusCode).toBe(200);
   expect((await app.inject({ url: "/api/scraper/hackathons?page=1", headers })).statusCode).toBe(200);
   expect((await app.inject({
     method: "POST", url: "/api/internal/etl/etl/import/mongodb", headers: internal, payload: { limit: 1 },
   })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "POST", url: "/api/internal/etl/etl/import/storage", headers: internal, payload: { limit: 1 },
+  })).statusCode).toBe(200);
+  expect((await app.inject({
+    method: "GET", url: "/api/internal/etl/etl/import/storage", headers: internal,
+  })).statusCode).toBe(403);
+  expect((await app.inject({
+    method: "POST", url: "/api/internal/etl/etl/import/storage", payload: { limit: 1 },
+  })).statusCode).toBe(403);
   expect(seen.map((v) => v.path)).toEqual([
-    "/functions/v1/scraper/pipeline/tick", "/functions/v1/scraper/pipeline",
-    "/functions/v1/scraper/pipeline/schedule", "/functions/v1/etl/events",
-    "/functions/v1/scraper/hackathons?page=1", "/functions/v1/etl/etl/import/mongodb",
+    "/functions/v1/scraper/pipeline/tick", "/functions/v1/etl/health", "/functions/v1/scraper/pipeline",
+    "/functions/v1/scraper/pipeline/schedule", "/functions/v1/scraper/pipeline/dead-letters?beforeId=9",
+    "/functions/v1/scraper/pipeline/dead-letters/8", "/functions/v1/scraper/pipeline/cancel",
+    "/functions/v1/scraper/pipeline/restart", "/functions/v1/etl/events",
+    "/functions/v1/scraper/pipeline/continue", "/functions/v1/scraper/pipeline/clear", "/functions/v1/scraper/pipeline/next-step",
+    "/functions/v1/scraper/hackathons?page=1", "/functions/v1/etl/etl/import/mongodb", "/functions/v1/etl/etl/import/storage",
   ]);
   expect(seen.every((v) => v.secret === TEST_GATEWAY_SECRET && v.caller === "team-2-gateway")).toBe(true);
 });

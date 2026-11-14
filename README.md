@@ -23,7 +23,36 @@ The public UI follows the Hackathon Service's `after_event_id` cursor so saves
 beyond the first 100 listings are not incorrectly removed. **Clear browser data**
 removes all HackScout bookmark collections on the device, not unrelated storage.
 
+## Current ingestion architecture
+
+The standalone [Python ETL service](./ETL/Readme.md), [Express scraper
+service](./scraper/Readme.md), and MongoDB staging have been **retired from the
+active pipeline**.
+
+| Retired component | Active replacement |
+|---|---|
+| Python FastAPI ETL in `ETL/` | Supabase `etl` Edge Function |
+| Express scraper in `scraper/` | Supabase `scraper` Edge Function |
+| MongoDB staging collection | Private Supabase Storage bucket `hackscout-staging` (default), prefix `hackscout/raw` |
+
+Scraping and ETL remain active capabilities, now implemented by the Edge
+Functions. Requests go through the main gateway; raw records live in the private
+bucket, and processed events, staging indexes, job state, receipts and dead letters
+live in PostgreSQL. MongoDB and the standalone services are not required for this
+pipeline. Configure runtime secrets in Supabase, not in the retired services'
+local environment files.
+
+Legacy source, regression tests, Docker definitions and launcher commands remain
+in the repository for reference; their presence does not make them active
+deployment requirements. Follow the [Supabase Functions guide](./supabase/functions/README.md)
+for the current deployment and configuration.
+
 ## Run locally
+
+The all-services launcher below is **legacy** and still starts the retired ETL
+and scraper. It has not been changed by this documentation update. For current
+Edge pipeline setup, use the [Supabase Functions guide](./supabase/functions/README.md);
+for disposable local integration testing, use the [testing guide](./docs/TESTING.md).
 
 Configure the service environment files, including the same
 `GATEWAY_INTERNAL_SECRET` for the main gateway, HackScout API, scraper, and ETL.
@@ -34,7 +63,9 @@ Run the root `npm run dev` and open
 `http://localhost:3001`. All application API calls go through the main gateway
 on port 4000. Listings, suggestions, and moderation use the Hackathon Service.
 Admin cookie sign-in is handled by the main gateway and JWT service; pipeline
-controls still use the protected HackScout API on port 3002.
+controls use the protected HackScout API in the legacy local launcher. Deployed
+pipeline controls route through the gateway to the Supabase scraper/ETL Edge
+Functions, with private Storage staging and PostgreSQL control/receipt tables.
 
 See [local setup](./docs/LOCAL-RUN.md) for the database migrations and the full service launcher, which serves the public UI on `http://localhost:3001`.
 
@@ -52,12 +83,26 @@ remain gateway-only; `/hackscout-admin/` serves the admin UI.
 
 For a separate static admin deployment, set the Vercel project's Root Directory
 to `admin-ui`. Its `vercel.json` forwards `/api/hackscout/admin/*` server-side
-through `https://hackascout-gateway.vercel.app`, including authentication,
+through the main gateway at `https://gateway-three-chi.vercel.app`, including authentication,
 moderation, and pipeline requests. This keeps browser requests and HttpOnly
 session cookies on the admin site's own origin. Update the rewrite destination
-if the HackScout frontend domain changes. Redeploy the admin project after
+if the main gateway domain changes. Redeploy the admin project after
 adding or changing this configuration; deploying only its static assets without
 the rewrite causes Vercel `NOT_FOUND` responses for admin API requests.
+
+## Testing and CI
+
+See [testing and CI](./docs/TESTING.md) for the complete coverage matrix,
+reproducible installation, local commands, and isolated runtime setup.
+`npm test` now includes all five Node components, SQL/control integration tests,
+and Deno Edge tests. Python suites run with `npm run test:python`.
+
+GitHub Actions runs Node 22/24, Python, schema/Edge integration, disposable
+PostgreSQL/Storage API journeys, then Chromium browser journeys. Vertical tests
+cover complete business flows; horizontal tests cover authentication boundaries,
+identity propagation, driver encoding, replay, and lease fencing.
+**Playwright execution is CI-only; it is not run locally.** These jobs never
+deploy, reset production, or require production secrets.
 
 ## Admin moderation
 
@@ -67,7 +112,10 @@ pre-approved local admin with no password gets a first-password creation form,
 matching Codyza Weather. No public admin registration or role selection is
 available. Admin sessions use an HttpOnly, SameSite cookie (Secure in production)
 until JWT expiry or sign-out and survive page reloads. Public user sessions remain
-in page memory. **First-password setup intentionally follows Weather's
+in page memory. If a protected API returns 401 or 403, the admin UI checks the
+dedicated session endpoint before signing out. Pipeline authorization failures
+and session-service outages remain visible errors without discarding a valid login.
+**First-password setup intentionally follows Weather's
 email-only flow: it does not verify email ownership. Provision passwordless admin
 accounts only when their intended owners are ready to activate them.**
 The main gateway
@@ -87,23 +135,40 @@ Apply [`20261106170000_event_suggestion_moderation.sql`](./supabase/migrations/2
 
 Search and paginate pending, approved, or rejected submissions. Supply the organizer, official website, format, start date, description, and location for non-virtual events before approving. Approval publishes a listing as **Needs Confirmation** with low evidence confidence; rejection requires a reason and does not publish. Both retain the reviewer, timestamp, and review note. Reviewed submissions are read-only.
 
-The dashboard also runs **reset MongoDB and PostgreSQL → scraper → MongoDB → ETL with AI → PostgreSQL**.
+The dashboard also runs **reset staging and PostgreSQL → scraper → staging → ETL with AI → PostgreSQL**.
 Enter an OpenAI-compatible key for each run. Locally it stays in process memory;
 on Vercel it is encrypted temporarily in the worker's control database, never
 stored as plaintext or passed into Workflow history. The UI shows
 stage and import counts, including partial failures. Configure
-`SCRAPER_SERVICE_URL` and `ETL_SERVICE_URL` on the main gateway and use the
-same MongoDB database/collection for both services. Every manual and automatic
+`SCRAPER_SERVICE_URL` and `ETL_SERVICE_URL` on the main gateway. Edge functions
+share a private Supabase Storage bucket/prefix; legacy standalone services share
+their MongoDB database/collection. Every manual and automatic
+Edge run stops scraping at **9,998 unique records** and then proceeds to ETL;
+duplicate source IDs do not consume additional slots. Every new manual and automatic
 run permanently deletes scraper records, event listings and their dependent
 records before scraping. Accounts, suggestions/review history, categories and
 team members are retained; published suggestions are unlinked from deleted events.
+Edge staging cleanup checkpoints batches of at most 100 deletions per tick before
+advancing to the PostgreSQL reset, rather than deleting the whole run in one request.
 A failed reset stops the pipeline; later failures can leave databases empty or
 partially filled. The two database resets are not atomic together.
+**Continue** requeues the latest stopped or failed Storage run at its saved
+checkpoint using a replacement API key, retaining the original run timestamp,
+progress and completed acknowledgements. It does not restart cleanup; a cleanup
+already underway finishes only its remaining batches. Unknown outcomes still
+block continuation, and a newer run makes older checkpoints unsafe to resume.
+**Clear all** permanently deletes staged records and event listings, then removes
+all pipeline runs and operation records only after both cleanups are acknowledged.
+It needs no AI key, disables automatic runs, and never starts scraping or ETL.
+Stop any active run first; unconfirmed operations, blockers and leases prevent
+clearing. Accounts, submissions and reviews are preserved. Cleanup continues on
+the server if you leave the page; the old progress display disappears when done.
+Edge ticks run once per second without overlapping an already leased step.
 ETL remains insert-only. Animated stage cards display reset/scraper/ETL elapsed times. Optional weekly,
 every-two-week, or monthly schedules use the pipeline host's `AI_API_KEY`.
 The [gateway-only Supabase Edge deployment](./supabase/functions/README.md)
-moves both services, durable orchestration and scheduling to Supabase while
-retaining MongoDB and existing gateway API paths. Configure
+moves both services, durable orchestration and scheduling to Supabase, uses
+private Supabase Storage for raw staging, and preserves browser gateway APIs. Configure
 `PIPELINE_SERVICE_URL` on the main gateway to select it.
 Without that Edge routing, Vercel requires the [durable workflow worker](./pipeline-worker/README.md), its
 control-schema migration, and `PIPELINE_WORKER_URL` on the HackScout backend.

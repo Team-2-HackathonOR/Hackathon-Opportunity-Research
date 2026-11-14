@@ -1,5 +1,6 @@
 import { getPaginationAnalyzerConfig } from './config.ts';
 import { requestJson } from './http.ts';
+import { PipelineFailure } from "../runtime.ts";
 import type { DevpostApiResponse } from './models.ts';
 import { normalizePaginationClassifications,normalizePaginationModelSummary } from './pagination-model.ts';
 import type {
@@ -103,9 +104,9 @@ export const requestPaginationModelResponse = async (
   });
 
   if (!completionResponse.ok) {
-    throw new Error(
-      `AI pagination analyzer request failed with status ${completionResponse.statusCode}.`,
-    );
+    throw new PipelineFailure(503, "PAGINATION_AI_UNAVAILABLE",
+      [408,429,500,502,503,504].includes(completionResponse.statusCode) ? "retry" : "pause",
+      `AI pagination analyzer returned HTTP ${completionResponse.statusCode} before persistence.`);
   }
 
   const aiContent = completionResponse.body.choices?.[0]?.message?.content;

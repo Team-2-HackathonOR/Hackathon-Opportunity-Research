@@ -1,0 +1,74 @@
+name: disposable-runtime
+
+on:
+  workflow_call:
+    inputs:
+      suite:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: ${{ inputs.suite }}-journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUITE: ${{ inputs.suite }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            gateway/package-lock.json
+            jwt-service/package-lock.json
+            services/hackathon-service/package-lock.json
+            scraper/package-lock.json
+            hackscout-gateway/package-lock.json
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.1.0
+      - name: Install locked dependencies
+        run: |
+          npm ci
+          for directory in gateway jwt-service services/hackathon-service scraper hackscout-gateway; do
+            npm ci --prefix "$directory"
+          done
+      - run: npm run build
+      - name: Start isolated PostgreSQL and Storage
+        run: |
+          docker info > /dev/null
+          if ! supabase start --workdir tests/runtime \
+            --exclude realtime,studio,imgproxy,postgres-meta,logflare,vector,edge-runtime,supavisor,mailpit \
+            > "$RUNNER_TEMP/hackscout-supabase-start.log" 2>&1; then
+            echo "Disposable Supabase failed to start. Raw credential-bearing CLI output is not published."
+            exit 1
+          fi
+      - name: Install CI browser only
+        if: inputs.suite == 'browser'
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Execute required journeys
+        run: |
+          case "$SUITE" in
+            api) npm run test:e2e:api ;;
+            browser) npm run test:e2e:browser ;;
+            *) echo "Unknown runtime suite"; exit 1 ;;
+          esac
+      - name: Preserve reports and sanitized service logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ inputs.suite }}-${{ github.run_attempt }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Stop only the disposable fixture project
+        if: always()
+        run: supabase stop --workdir tests/runtime --no-backup

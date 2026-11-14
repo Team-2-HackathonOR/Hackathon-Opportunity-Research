@@ -12,5 +12,6 @@ let scraping = false;
 let pipelineTimer;
 let pipelineClock;
 let pipelineJob = null;
+let stoppingPipeline = false;
 let queueController = null;
 let searchTimer;

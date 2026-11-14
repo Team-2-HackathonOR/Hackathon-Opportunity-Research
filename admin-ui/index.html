@@ -7,9 +7,14 @@
     <link rel="stylesheet" href="styles.css" />
     <script src="app.js" defer></script>
     <script src="admin-utils.js" defer></script>
+    <script src="admin-dead-letters.js" defer></script>
+    <script src="admin-pipeline-next-step.js" defer></script>
     <script src="admin-queue.js" defer></script>
     <script src="admin-auth.js" defer></script>
     <script src="admin-pipeline.js" defer></script>
+    <script src="admin-pipeline-stop.js" defer></script>
+    <script src="admin-pipeline-continue.js" defer></script>
+    <script src="admin-pipeline-clear.js" defer></script>
     <script src="admin-events.js" defer></script>
   </head>
   <body>
@@ -42,21 +47,31 @@
         <section class="panel scraper-panel" aria-labelledby="scraper-title">
           <p class="eyebrow">DATA COLLECTION</p>
           <h2 id="scraper-title">Run the full data pipeline</h2>
-          <p>Every manual and automatic run permanently clears scraper records and event listings before scraping Devpost and importing with AI. Accounts, suggestions/review history, categories and team members are preserved; deleted listings are unlinked from reviews. A failed run can leave databases empty or partially filled. The API key is used only for this run and is not saved.</p>
+          <p>Every new manual and automatic Edge run permanently clears its Supabase Storage staging records and event listings before scraping Devpost and importing with AI. Accounts, suggestions/review history, categories and team members are preserved; deleted listings are unlinked from reviews. A failed run can leave staging or listings empty or partially filled. The API key is used only for this run and is not saved.</p>
           <form id="scraper-form">
             <label>AI API key<input id="scraper-api-key" type="password" autocomplete="off" spellcheck="false" required maxlength="4096" /></label>
             <div class="review-actions"><button id="scraper-run" class="primary" type="submit">Run scraper and ETL</button></div>
           </form>
+          <button id="pipeline-stop" class="danger" type="button" disabled title="No queued or running pipeline to stop." aria-describedby="pipeline-stop-help">Stop pipeline</button>
+          <button id="pipeline-reset" class="danger" type="button" hidden>Reset &amp; restart</button>
+          <button id="pipeline-continue" class="primary" type="button" hidden aria-describedby="pipeline-continue-help">Continue</button>
+          <button id="pipeline-next-step" class="primary" type="button" hidden aria-describedby="pipeline-next-step-help">Go to next step</button>
+          <button id="pipeline-clear" class="danger" type="button" aria-describedby="pipeline-clear-help">Clear all</button>
+          <p id="pipeline-clear-help" class="hint">Clear all permanently removes staged records, event listings, dead letters, pipeline history and operation records without scraping again. No AI key is needed. Stop an active run first; unconfirmed operations must be investigated. History and dead letters are removed only after cleanup is confirmed.</p>
+          <p id="pipeline-continue-help" class="hint">Continue requires a new API key above and resumes the latest stopped or failed run at its saved checkpoint, without starting over. A paused cleanup finishes its remaining deletions. Operations with unknown outcomes still require investigation.</p>
+          <p id="pipeline-next-step-help" class="hint">After stopping the scraper, Go to next step ends scraping early and starts ETL using only records already staged, with a fresh API key and confirmation. It never skips unfinished cleanup or an unconfirmed operation. Use Continue to keep scraping instead.</p>
+          <p id="pipeline-stop-help" class="hint">Stopping disables automatic runs and prevents further steps. An operation already executing may finish; completed deletions cannot be undone.</p>
+          <p class="hint">Reset &amp; restart requires a new API key above and confirmation. It queues a fresh cleanup, scrape and ETL run and disables automatic runs; it never bypasses an uncertain-operation interlock.</p>
           <section id="pipeline-progress" class="pipeline-progress" aria-label="Pipeline progress" hidden>
             <ol class="pipeline-steps">
               <li id="pipeline-step-reset" class="pipeline-step" data-status="waiting">
                 <span class="pipeline-marker">1</span>
-                <div class="pipeline-step-copy"><strong>Reset databases</strong><span>Delete scraper records and event listings</span><span id="pipeline-status-reset">Waiting</span></div>
+                <div class="pipeline-step-copy"><strong>Reset staging and listings</strong><span>Delete staging records and event listings</span><span id="pipeline-status-reset">Waiting</span></div>
                 <span id="pipeline-time-reset" class="pipeline-time" aria-label="Reset elapsed time">00:00</span>
               </li>
               <li id="pipeline-step-scraper" class="pipeline-step" data-status="waiting">
                 <span class="pipeline-marker" aria-hidden="true">2</span>
-                <div class="pipeline-step-copy"><strong>Scraper</strong><span>Devpost to MongoDB</span><span id="pipeline-status-scraper">Waiting</span></div>
+                <div class="pipeline-step-copy"><strong>Scraper</strong><span>Devpost to Supabase Storage</span><span id="pipeline-status-scraper">Waiting</span></div>
                 <span id="pipeline-time-scraper" class="pipeline-time" aria-label="Scraper elapsed time">00:00</span>
               </li>
               <li id="pipeline-step-etl" class="pipeline-step" data-status="waiting">
@@ -65,7 +80,7 @@
                 <span id="pipeline-time-etl" class="pipeline-time" aria-label="ETL elapsed time">00:00</span>
               </li>
             </ol>
-            <p class="hint">Total elapsed: <span id="pipeline-time-total" class="pipeline-time">00:00</span>. Activity animation indicates work in progress, not percentage completed.</p>
+            <p class="hint">Total elapsed: <span id="pipeline-time-total" class="pipeline-time">00:00</span>, including queue and paused time. Supabase advances one step per cron tick; waiting does not mean deletion is executing.</p>
           </section>
           <p id="scraper-result" role="status" aria-live="polite"></p>
           <form id="pipeline-schedule-form" class="pipeline-schedule-form">
@@ -75,6 +90,20 @@
             <button id="pipeline-schedule-save" class="secondary" type="submit">Save schedule</button>
             <p id="pipeline-schedule-status" role="status" aria-live="polite"></p>
           </form>
+        </section>
+        <section class="panel" aria-labelledby="dead-letter-title">
+          <p class="eyebrow">ETL REVIEW</p>
+          <h2 id="dead-letter-title">Dead-letter queue</h2>
+          <p class="hint">Confirmed failed records are saved here before ETL moves on. Original source data survives normal restarts. Records await instructions; nothing is retried or discarded automatically. Clear all permanently removes this queue.</p>
+          <div class="review-actions">
+            <button id="dead-letter-refresh" class="secondary" type="button">Refresh newest</button>
+            <button id="dead-letter-older" class="secondary" type="button" disabled>Older records</button>
+          </div>
+          <p id="dead-letter-count" role="status" aria-live="polite"></p>
+          <pre id="dead-letter-list" class="hint" style="white-space:pre-wrap;overflow-wrap:anywhere" role="status" aria-live="polite"></pre>
+          <label>Dead-letter ID<input id="dead-letter-id" type="text" inputmode="numeric" maxlength="19" placeholder="ID from the list" /></label>
+          <button id="dead-letter-view" class="secondary" type="button">View original record</button>
+          <pre id="dead-letter-detail" class="hint" style="white-space:pre-wrap;overflow-wrap:anywhere" role="status"></pre>
         </section>
         <section class="panel queue" aria-label="Submitted hackathons">
           <div class="toolbar">

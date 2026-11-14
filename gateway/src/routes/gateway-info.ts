@@ -32,6 +32,7 @@ export const gatewayInfoRoutes: FastifyPluginAsync = async (app) => {
       { path: "POST /api/internal/hackathons/reset", upstream: env.HACKATHON_SERVICE_URL, access: "internal pipeline" },
       { path: "/api/internal/scraper/hackathons/persist-all", upstream: env.SCRAPER_SERVICE_URL ?? "http://127.0.0.1:3000", access: "internal pipeline" },
       { path: "/api/internal/etl/etl/import/mongodb", upstream: env.ETL_SERVICE_URL, access: "internal pipeline" },
+      { path: "/api/internal/etl/etl/import/storage", upstream: env.ETL_SERVICE_URL, access: "internal pipeline" },
       { path: "/proxy/graphql", upstream: env.PROXY_GRAPHQL_UPSTREAM_URL ?? "not configured", access: "public" },
     ],
   }));

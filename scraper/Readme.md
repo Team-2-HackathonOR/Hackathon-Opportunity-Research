@@ -1,5 +1,14 @@
 # Devpost hackathon scraper
 
+> **Retired standalone service.** The Express scraper and MongoDB staging
+> collection have been replaced in the active pipeline by the Supabase `scraper`
+> Edge Function and private Supabase Storage bucket `hackscout-staging` (default),
+> using prefix `hackscout/raw`. MongoDB is no longer a pipeline dependency.
+> Do not start or deploy this service for the current pipeline.
+> See the [Supabase Functions guide](../supabase/functions/README.md).
+> Source and regression tests remain for reference; the instructions below
+> describe the legacy implementation.
+
 Scraper API operations under `/hackathons` require the main gateway's
 `x-gateway-caller` and `x-gateway-secret` headers. Set
 `GATEWAY_INTERNAL_SECRET` to the same server-side value used by the gateway.

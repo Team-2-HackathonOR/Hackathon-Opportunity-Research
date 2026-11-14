@@ -18,37 +18,70 @@ function updatePipelineClock() {
 }
 
 function showPipeline(job) {
+  const cleared = pipelineJob?.purpose === "clear" && !job;
   clearInterval(pipelineClock);
   pipelineJob = job;
-  scraping = job?.status === "running";
-  $("#scraper-run").disabled = scraping;
+  scraping = job?.status === "running" || job?.status === "queued";
+  $("#scraper-run").disabled = scraping || stoppingPipeline;
+  $("#pipeline-stop").hidden = false;
+  $("#pipeline-stop").disabled = !scraping || stoppingPipeline;
+  $("#pipeline-stop").title = scraping ? "Stop this run and disable automatic runs."
+    : "No queued or running pipeline to stop.";
+  $("#pipeline-reset").hidden = !job;
+  $("#pipeline-reset").disabled = stoppingPipeline;
+  $("#pipeline-clear").disabled = scraping || stoppingPipeline;
+  $("#pipeline-clear").title = scraping ? "Stop the active pipeline before clearing." : "Permanently clear pipeline data and history.";
+  $("#pipeline-continue").hidden = job?.status !== "failed" || job?.stagingBackend !== "supabase-storage" || job?.purpose === "clear";
+  $("#pipeline-continue").disabled = scraping || stoppingPipeline;
+  $("#pipeline-next-step").hidden = !canAdvancePipeline(job);
+  $("#pipeline-next-step").disabled = scraping || stoppingPipeline;
   $("#pipeline-progress").hidden = !job;
-  $("#scraper-result").classList.toggle("error", job?.status === "failed");
+  $("#scraper-result").classList.toggle("error", job?.status === "failed" || job?.etl?.deadLettered > 0);
   if (!job) {
-    $("#scraper-result").textContent = "";
+    $("#scraper-result").textContent = cleared ? "Pipeline data, dead letters, run history and operation records cleared. Automatic runs are disabled." : "";
+    for (const stage of ["reset", "scraper", "etl", "total"]) $(`#pipeline-time-${stage}`).textContent = "00:00";
     return;
   }
+  const waiting = job.status === "queued" || job.executionState === "waiting";
   for (const stage of ["reset", "scraper", "etl"]) {
-    const status = job.steps?.[stage]?.status || "waiting";
+    const rawStatus = job.steps?.[stage]?.status || "waiting";
+    const status = scraping && waiting && rawStatus === "running" ? "waiting" : rawStatus;
     $(`#pipeline-step-${stage}`).dataset.status = status;
     $(`#pipeline-step-${stage} .pipeline-marker`).textContent = status === "completed" ? "OK"
       : status === "failed" ? "!" : stage === "reset" ? "1" : stage === "scraper" ? "2" : "3";
-    $(`#pipeline-status-${stage}`).textContent = {
-      running: "Running", completed: "Completed", failed: "Failed", skipped: "Skipped", waiting: "Waiting",
+    const deadLetters = stage === "etl" && status === "completed" && job.etl?.deadLettered > 0;
+    if (deadLetters) {
+      $(`#pipeline-step-${stage}`).dataset.status = "failed";
+      $(`#pipeline-step-${stage} .pipeline-marker`).textContent = "!";
+    }
+    $(`#pipeline-status-${stage}`).textContent = stage === "scraper" && job.scraper?.endedEarly ? "Ended early by administrator" : deadLetters ? "Completed with dead letters" : {
+      running: "Running", retrying: "Retry scheduled", completed: "Completed", failed: "Failed", skipped: "Skipped", waiting: "Waiting", cancelled: "Stopped",
     }[status] || "Waiting";
   }
   updatePipelineClock();
   if (scraping) pipelineClock = setInterval(updatePipelineClock, 1000);
   const scrape = job.scraper
-    ? `Scraper: ${job.scraper.pagesPersisted} pages, ${job.scraper.uniqueHackathonsPersisted} unique records. ` : "";
+    ? `Scraper: ${job.scraper.pagesPersisted} pages, ${job.scraper.uniqueHackathonsPersisted} unique records${job.scraper.endedEarly ? " (ended early)" : ""}. ` : "";
   const etl = job.etl
-    ? `ETL: ${job.etl.processed} processed, ${job.etl.inserted} inserted, ${job.etl.failed} failed. ` : "";
+    ? `ETL: ${job.etl.processed} processed, ${job.etl.inserted} inserted, ${job.etl.failed} failed${job.etl.deadLettered ? ` (${job.etl.deadLettered} dead-lettered)` : ""}. ` : "";
   const reset = Object.entries(job.reset || {})
     .map(([database, count]) => `${database}: ${count} deleted`).join(", ");
   const resetSummary = reset ? `Reset ${reset}. ` : "";
+  if (scraping && job.retry) {
+    $("#scraper-result").textContent = `${resetSummary}${scrape}${etl}Temporary failure (${job.retry.code}). Attempt ${job.retry.attempt} of ${job.retry.maxAttempts}; automatic retry at ${new Date(job.retry.nextAttemptAt).toLocaleTimeString()}. ${job.retry.message}`;
+    return;
+  }
+  if (scraping && waiting) {
+    $("#scraper-result").textContent = `${job.purpose === "clear" ? "Clear all: " : ""}${resetSummary}${scrape}${etl}${job.status === "queued" ? "Queued" : `Waiting to advance ${job.cursor?.phase || job.stage}`}. No worker is executing this step. Check that the Supabase cron tick is active.`;
+    return;
+  }
+  if (job.cancelled) {
+    $("#scraper-result").textContent = `${resetSummary}${scrape}${etl}${job.error} Automatic runs are disabled.`;
+    return;
+  }
   $("#scraper-result").textContent = scraping
-    ? `${resetSummary}${scrape}Running ${job.stage}. You can leave this page; the server continues the run.`
-    : `${resetSummary}${scrape}${etl}${job.status === "completed" ? "Pipeline completed." : `Pipeline failed at ${job.stage}: ${job.error}`}`;
+    ? `${resetSummary}${scrape}${etl}${job.purpose === "clear" ? "Clear all is deleting data and will remove history and dead letters after confirmed cleanup; no scraping or ETL will start." : `Running ${job.stage}.`} You can leave this page; the server continues the run.`
+    : `${resetSummary}${scrape}${etl}${job.status === "completed" ? job.etl?.deadLettered ? "Pipeline completed with dead letters. Review the queue for instructions." : job.scraper?.endedEarly ? "Pipeline completed after scraping was ended early." : "Pipeline completed." : `Pipeline failed at ${job.stage}: ${job.error}`}`;
 }
 
 async function loadPipeline() {
@@ -58,6 +91,7 @@ async function loadPipeline() {
     if (!authenticated) return;
     showPipeline(result.job);
     await loadPipelineSchedule(false);
+    await loadDeadLetters();
     if (authenticated) pipelineTimer = setTimeout(loadPipeline, scraping ? 3000 : 10000);
   } catch (error) {
     console.error("Could not load pipeline status:", error);
@@ -69,6 +103,14 @@ async function loadPipeline() {
 
 function showPipelineSchedule(schedule, updateSelection = true) {
   if (updateSelection) $("#pipeline-frequency").value = schedule.frequency;
+  if (schedule.workerConfigured === false) {
+    const needsWorker = scraping || schedule.frequency !== "off";
+    $("#pipeline-schedule-status").classList.toggle("error", needsWorker || !!schedule.lastError);
+    $("#pipeline-schedule-status").textContent = schedule.lastError || (needsWorker
+      ? "Pipeline worker is not scheduled. Configure the active hackscout-edge-tick cron job in Supabase; queued runs cannot advance."
+      : "Pipeline worker is stopped. Automatic runs are disabled.");
+    return;
+  }
   const next = schedule.nextRunAt ? new Date(schedule.nextRunAt).toLocaleString(undefined, {
     timeZone: schedule.timeZone, dateStyle: "medium", timeStyle: "short",
   }) : null;
@@ -108,15 +150,17 @@ $("#pipeline-schedule-form").addEventListener("submit", async (event) => {
 
 $("#scraper-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (scraping) return;
+  if (scraping || stoppingPipeline) return;
   scraping = true;
   $("#scraper-run").disabled = true;
+  $("#pipeline-reset").disabled = true;
+  $("#pipeline-continue").disabled = true;
+  $("#pipeline-next-step").disabled = true;
+  $("#pipeline-clear").disabled = true;
   $("#scraper-result").classList.remove("error");
   $("#scraper-result").textContent = "Starting the scraper and ETL pipeline...";
   clearTimeout(pipelineTimer);
   clearInterval(pipelineClock);
-  pipelineJob = null;
-  $("#pipeline-progress").hidden = true;
   try {
     const request = api("pipeline/run", {
       method: "POST",
@@ -126,14 +170,18 @@ $("#scraper-form").addEventListener("submit", async (event) => {
     const result = await request;
     if (!authenticated) return;
     showPipeline(result.job);
-    if (scraping && authenticated) pipelineTimer = setTimeout(loadPipeline, 3000);
   } catch (error) {
     console.error("Could not start pipeline:", error);
+    scraping = false;
+    if (authenticated) showPipeline(pipelineJob);
     $("#scraper-result").classList.add("error");
     $("#scraper-result").textContent = error.message;
-    scraping = false;
-    $("#scraper-run").disabled = false;
   } finally {
     $("#scraper-api-key").value = "";
+    $("#pipeline-reset").disabled = stoppingPipeline;
+    $("#pipeline-continue").disabled = scraping || stoppingPipeline;
+    $("#pipeline-next-step").disabled = scraping || stoppingPipeline;
+    $("#pipeline-clear").disabled = scraping || stoppingPipeline;
+    if (authenticated) pipelineTimer = setTimeout(loadPipeline, 3000);
   }
 });

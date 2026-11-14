@@ -1,5 +1,13 @@
 # Local run (gateway + services)
 
+> **Architecture notice:** the standalone Python ETL, Express scraper and MongoDB
+> staging have been retired from the active pipeline. Their replacements are the
+> Supabase `etl` and `scraper` Edge Functions and a private Supabase Storage bucket.
+> This page retains legacy launcher instructions; MongoDB and the old services
+> are not prerequisites for the current pipeline. Use the
+> [Supabase Functions guide](../supabase/functions/README.md) for active pipeline
+> configuration and the [testing guide](./TESTING.md) for isolated runtime tests.
+
 ## 1. Database connection string
 
 Supabase is **PostgreSQL hosting**. The service does not use the Supabase JS client.
@@ -39,7 +47,7 @@ your actual SMTP host and credentials. The root launcher loads this file.
 
 Set `MAIL_SERVICE_URL=http://127.0.0.1:4005` on `jwt-service`. Leave it unset to keep invite links in the API response without sending mail.
 
-## 3c. ETL service
+## 3c. Retired ETL service (legacy reference only)
 
 Copy `ETL/.env.example` to `ETL/.env` and configure `DATABASE_URL` for the
 research database and `MONGODB_CONNECTION_STRING` for MongoDB.
@@ -85,7 +93,7 @@ It selects Python 3.12 (downloading it if necessary), creates a separate `.venv`
 inside each Python service, and installs its requirements.
 The Python launch scripts use Windows virtual-environment paths.
 
-## 6. Start all services together
+## 6. Legacy all-services launcher (includes retired services)
 
 After configuring the `.env` files and installing dependencies:
 
@@ -204,6 +212,12 @@ link, topics, and fee details. An end date cannot precede the start date.
 Approval publishes the listing and records the review in one database
 transaction as **Needs Confirmation** with low confidence, not verified
 eligibility. Refresh public listings to see newly published events.
+
+### Retired MongoDB pipeline (historical reference only)
+
+The following describes the old standalone pipeline, not the current dashboard's
+Edge implementation. Current runs use private Supabase Storage staging and
+durable PostgreSQL state; see the [Supabase Functions guide](../supabase/functions/README.md).
 
 Admins can run the complete pipeline from the admin dashboard. Enter an
 OpenAI-compatible API key for each run. **Every manual and scheduled run first

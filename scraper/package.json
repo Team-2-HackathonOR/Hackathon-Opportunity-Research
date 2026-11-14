@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "test": "node --import tsx --test test/*.test.ts",
     "start": "tsx index.ts",
     "start:prod": "node dist/index.js",
     "dev": "tsx watch index.ts",

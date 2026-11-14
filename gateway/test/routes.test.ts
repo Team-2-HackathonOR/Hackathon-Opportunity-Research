@@ -49,6 +49,7 @@ describe("gateway routes", () => {
         { path: "POST /api/internal/hackathons/reset", upstream: "http://127.0.0.1:4001", access: "internal pipeline" },
         { path: "/api/internal/scraper/hackathons/persist-all", upstream: "http://127.0.0.1:3000", access: "internal pipeline" },
         { path: "/api/internal/etl/etl/import/mongodb", upstream: "http://127.0.0.1:8000", access: "internal pipeline" },
+        { path: "/api/internal/etl/etl/import/storage", upstream: "http://127.0.0.1:8000", access: "internal pipeline" },
         { path: "/proxy/graphql", upstream: "not configured", access: "public" },
       ],
     });

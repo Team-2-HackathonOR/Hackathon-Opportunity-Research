@@ -1,5 +1,8 @@
 import { z } from "npm:zod@3.25.76";
 
+export const validationIssues = (error: z.ZodError) =>
+  error.issues.slice(0, 20).map(({ path, code }) => ({ path, code }));
+
 const text = z.string().nullable().default(null);
 const name = z.string().min(1);
 const id = z.number().int().safe().nullable().default(null);
@@ -14,6 +17,7 @@ export const sourceKinds = ["official_site", "registration_page", "rules_faq", "
 export const trackKinds = ["theme", "track", "sponsor_challenge", "required_technology", "api_platform_requirement"] as const;
 export const benefitKinds = ["prize", "sponsor_prize", "workshop", "mentor", "recruiter", "networking", "certificate", "credit", "incubator", "hardware", "participant_benefit", "career_exposure", "other"] as const;
 export const milestoneKinds = ["registration_deadline", "travel_grant_deadline", "acceptance_date", "confirmation_deadline", "pre_event_requirement", "registration_open", "event_start", "event_end", "other"] as const;
+export const requirementKinds = ["registration_account", "resume", "portfolio_github", "student_verification", "essay_questions", "team_information", "project_idea", "referral_invite", "deadline", "post_acceptance_step", "other"] as const;
 
 export const teamMemberSchema = z.object({ full_name: name, email: text, role_name: text, active: z.boolean().default(true) });
 export const eventSchema = z.object({
@@ -49,7 +53,7 @@ export const eventSchema = z.object({
     organizer_credibility: text, learning_networking_potential: text, evidence_quality_notes: text,
     why_practical: name, still_needs_verification: text }).nullable().default(null),
   application_requirement_items: z.array(z.object({ queue_type: queue,
-    requirement_type: z.enum(["registration_account", "resume", "portfolio_github", "student_verification", "essay_questions", "team_information", "project_idea", "referral_invite", "deadline", "post_acceptance_step", "other"]),
+    requirement_type: z.enum(requirementKinds),
     requirement_text: name, due_at: instant,
     status: z.enum(["not_started", "in_progress", "ready", "submitted", "not_applicable"]).default("not_started"),
     owner_member_id: id, notes: text })).default([]),
@@ -66,9 +70,21 @@ export const eventSchema = z.object({
 export type EventInput = z.infer<typeof eventSchema>;
 export type RawRecord = Record<string, unknown>;
 
-export const mongoImportSchema = z.object({
+export const storageImportSchema = z.object({
   database_name: text, collection_name: text, limit: z.number().int().min(1).max(1000).nullable().default(25),
-  fetched_at: z.string().min(1).max(40).nullable().default(null), cursor_mode: z.boolean().default(false),
+  fetched_at: z.string().min(1).max(40).refine((value) => Number.isFinite(Date.parse(value)), "Invalid run timestamp").nullable().default(null), cursor_mode: z.boolean().default(false),
   after_id: z.number().int().safe().min(0).nullable().default(null),
   use_ai_normalization: z.boolean().default(true), primary_researcher_id: id, verifier_id: id,
+  pipeline_job_id: z.string().uuid().optional(),
+  pipeline_operation: z.string().regex(/^etl-(?:first|[0-9]+)$/).max(80).optional(),
+  pipeline_execution_id: z.string().uuid().optional(),
+}).superRefine((value, context) => {
+  const supplied = [value.pipeline_job_id, value.pipeline_operation, value.pipeline_execution_id]
+    .filter((field) => field !== undefined).length;
+  if (supplied !== 0 && supplied !== 3) context.addIssue({
+    code: z.ZodIssueCode.custom, message: "Pipeline context requires all three identity fields.",
+  });
+  if (supplied && (!value.cursor_mode || value.limit !== 1 || !value.fetched_at)) context.addIssue({
+    code: z.ZodIssueCode.custom, message: "Pipeline context is valid only for one-record cursor imports.",
+  });
 });

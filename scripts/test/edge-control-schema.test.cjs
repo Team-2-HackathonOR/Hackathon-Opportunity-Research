@@ -9,7 +9,20 @@ test("Edge control DDL upgrades existing jobs, denies browser roles and dispatch
   const db = new PGlite();
   try {
     await db.exec("CREATE ROLE anon; CREATE ROLE authenticated;");
-    await db.exec(await readFile(path.join(root, "pipeline-worker/migrations/001_pipeline_control.sql"), "utf8"));
+    // Preserve the pre-Edge jobs shape without depending on the removed Vercel worker.
+    await db.exec(`
+      CREATE SCHEMA pipeline_control;
+      CREATE TABLE pipeline_control.jobs (
+        id uuid PRIMARY KEY,
+        status text NOT NULL CHECK (status IN ('queued','running','completed','failed')),
+        job jsonb NOT NULL,
+        key_ciphertext text,
+        key_expires_at timestamptz NOT NULL,
+        workflow_id text,
+        blocked_until timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+    `);
     await db.exec(`
       CREATE SCHEMA vault;
       CREATE TABLE vault.decrypted_secrets(name text PRIMARY KEY,decrypted_secret text);

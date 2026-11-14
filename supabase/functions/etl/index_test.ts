@@ -15,8 +15,8 @@ Deno.test("both functions reject direct callers before health, parsing, scheduli
   Deno.env.set("GATEWAY_INTERNAL_SECRET", headers["x-gateway-secret"]);
   try {
     for (const [handler, functionName, paths] of [
-      [handleRequest, "scraper", ["", "/health", "/pipeline", "/pipeline/run", "/pipeline/tick", "/schedule", "/hackathons/reset"]],
-      [handleETL, "etl", ["", "/health", "/events", "/team-members", "/etl/import/mongodb", "/etl/import/file"]],
+      [handleRequest, "scraper", ["", "/health", "/pipeline", "/pipeline/run", "/pipeline/restart", "/pipeline/cancel", "/pipeline/tick", "/schedule", "/hackathons/reset"]],
+      [handleETL, "etl", ["", "/health", "/events", "/team-members", "/etl/import/storage", "/etl/import/mongodb", "/etl/import/file"]],
     ] as const) {
       for (const path of paths) {
         for (const method of ["GET", "POST", "OPTIONS"]) {
@@ -29,11 +29,40 @@ Deno.test("both functions reject direct callers before health, parsing, scheduli
       }
       const health = await handler(new Request(`https://example.test/functions/v1/${functionName}/health`, { headers }));
       assert(health.status === 200, "Authenticated health should work without database configuration.");
+      if (functionName === "etl") {
+        const native = await handler(new Request("https://example.test/etl/health", { method: "POST", headers }));
+        assert(native.status === 200, "Gateway readiness must support the native Edge health prefix.");
+      }
     }
     const viewer = await handleRequest(new Request("https://example.test/functions/v1/scraper/pipeline", {
       headers: { ...headers, "x-user-role": "viewer" },
     }));
     assert(viewer.status === 403, "Pipeline control must not accept viewer identities.");
+    for (const role of ["viewer", ""]) {
+      const cancel = await handleRequest(new Request("https://example.test/functions/v1/scraper/pipeline/cancel", {
+        method: "POST", headers: { ...headers, ...(role ? { "x-user-role": role } : {}) },
+        body: JSON.stringify({ jobId: "11111111-1111-4111-8111-111111111111" }),
+      }));
+      assert(cancel.status === 403, "Only verified administrators may stop a run.");
+    }
+    const invalid = await handleRequest(new Request("https://example.test/functions/v1/scraper/pipeline/cancel", {
+      method: "POST", headers: { ...headers, "x-user-role": "admin" }, body: JSON.stringify({ jobId: "invalid" }),
+    }));
+    assert(invalid.status === 400, "Invalid stop targets must fail before database access.");
+    const restart = "https://example.test/functions/v1/scraper/pipeline/restart";
+    for (const role of ["viewer", ""]) {
+      const denied = await handleRequest(new Request(restart, {
+        method: "POST", headers: { ...headers, ...(role ? { "x-user-role": role } : {}) },
+        body: JSON.stringify({ jobId: "11111111-1111-4111-8111-111111111111", apiKey: "fixture" }),
+      }));
+      assert(denied.status === 403, "Restart requires a verified administrator.");
+    }
+    for (const payload of [{ jobId: "invalid", apiKey: "fixture" }, { jobId: "11111111-1111-4111-8111-111111111111" }]) {
+      const rejected = await handleRequest(new Request(restart, {
+        method: "POST", headers: { ...headers, "x-user-role": "admin" }, body: JSON.stringify(payload),
+      }));
+      assert(rejected.status === 400, "Invalid restart requests must fail before database access.");
+    }
   } finally {
     if (previous === undefined) Deno.env.delete("GATEWAY_INTERNAL_SECRET");
     else Deno.env.set("GATEWAY_INTERNAL_SECRET", previous);
@@ -44,8 +73,10 @@ Deno.test("ETL function paths preserve gateway-facing endpoint paths", () => {
   assert(etlPath("https://example.test/functions/v1/etl/etl/import/mongodb") === "/etl/import/mongodb");
   assert(etlPath("https://example.test/etl/etl/import/file") === "/etl/import/file");
   assert(etlPath("https://example.test/etl/import/mongodb") === "/etl/import/mongodb");
+  assert(etlPath("https://example.test/functions/v1/etl/etl/import/storage") === "/etl/import/storage");
   assert(etlPath("https://example.test/functions/v1/etl/events") === "/events");
   assert(etlPath("https://example.test/etl/team-members") === "/team-members");
+  assert(etlPath("https://example.test/etl/health") === "/health");
 });
 
 Deno.test("base normalization retains source mapping, category dedupe, status and contributions", () => {
@@ -107,4 +138,30 @@ Deno.test("Rome schedules preserve spring DST, fall DST, monthly and biweekly be
   assert(nextOccurrence(new Date("2027-10-30T12:00:00Z"), "weekly") === "2027-10-31T00:00:00.000Z");
   assert(nextOccurrence(new Date("2027-01-03T01:00:00Z"), "biweekly", true) === "2027-01-17T01:00:00.000Z");
   assert(nextOccurrence(new Date("2027-01-02T12:00:00Z"), "monthly") === "2027-02-01T01:00:00.000Z");
+});
+
+Deno.test("AI requirement classification preserves content and known types without bypassing invalid fields", () => {
+  const base = buildBaseEvent({ title: "Test" }, null, null);
+  const item = { queue_type: "apply_now", requirement_type: "attendance_acknowledgement",
+    requirement_text: "Attend kickoff", notes: "Original note." };
+  const logs: unknown[][] = [];
+  const previous = console.warn;
+  try {
+    console.warn = (...args: unknown[]) => { logs.push(args); };
+    const result = mergeAiPayload(base, { application_requirement_items: [
+      item, { ...item, requirement_type: " RESUME " }, { ...item, requirement_type: "CV" },
+    ] });
+    const [unknown, known, alias] = result.application_requirement_items;
+    assert(unknown.requirement_type === "other" && unknown.requirement_text === item.requirement_text);
+    assert(unknown.notes?.includes("Original note.") === true && unknown.notes?.includes("normalized to other") === true);
+    assert(known.requirement_type === "resume" && alias.requirement_type === "resume" && known.notes === item.notes);
+    assert(logs.length === 1 && !JSON.stringify(logs).includes(item.requirement_type));
+    assert(!eventSchema.safeParse({ ...base, application_requirement_items: [item] }).success, "Direct API schema must remain strict.");
+    for (const requirement_type of [undefined, null, 42, "", true]) {
+      let failed = false;
+      try { mergeAiPayload(base, { application_requirement_items: [{ ...item, requirement_type }] }); }
+      catch (error) { failed = error instanceof Error && error.name === "ZodError"; }
+      assert(failed, "Missing or malformed requirement classification was silently accepted.");
+    }
+  } finally { console.warn = previous; }
 });
